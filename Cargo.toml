@@ -4,5 +4,6 @@ members = [
     "coordinator",
     "worker",
     "cli",
-    "utils"
+    "utils",
+    "service",
 ]
