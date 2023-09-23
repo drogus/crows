@@ -1,10 +1,8 @@
 #![feature(async_fn_in_trait)]
-#![feature(specialization)]
-
-use std::convert;
+#![feature(return_position_impl_trait_in_trait)]
 
 use convert_case::{Case, Casing};
-use proc_macro::{Span, TokenStream};
+use proc_macro::TokenStream;
 use syn::parse::{Parse, ParseStream};
 
 extern crate proc_macro;
@@ -12,9 +10,9 @@ extern crate proc_macro2;
 extern crate quote;
 extern crate syn;
 
-use quote::{format_ident, quote, ToTokens};
+use quote::quote;
 use syn::spanned::Spanned;
-use syn::token::{Comma, Mut, RArrow};
+use syn::token::{Comma, Mut};
 use syn::{
     braced, parenthesized, parse_macro_input, parse_quote, Attribute, FnArg, Ident, LitStr, Pat,
     PatType, Result, ReturnType, Token, Type, Visibility,
@@ -32,6 +30,7 @@ macro_rules! extend_errors {
     };
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct ServiceMacroInput {
     attrs: Vec<Attribute>,
@@ -40,6 +39,7 @@ struct ServiceMacroInput {
     methods: Vec<Method>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct Method {
     attrs: Vec<Attribute>,
@@ -154,7 +154,6 @@ impl Parse for AttrsInput {
 
 #[proc_macro_attribute]
 pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
-    println!("ATTRS: {attr:?}");
     let attrs = parse_macro_input!(attr as AttrsInput);
 
     let derive = quote! {
@@ -166,18 +165,10 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
     let unit_type: &Type = &parse_quote!(());
 
     let ident = input.ident;
-    let mut result = quote! {
-        pub trait #ident {
-            async fn hello(&self, name: String) -> String;
-
-
-        }
-    };
-
     let request_ident = Ident::new(&format!("{}Request", ident), ident.span());
     let response_ident = Ident::new(&format!("{}Response", ident), ident.span());
     let message_ident = Ident::new(&format!("{}Message", ident), ident.span());
-    let service_ident = Ident::new(&format!("{}Service", ident), ident.span());
+    let dummy_ident = Ident::new(&format!("Dummy{}Service", ident), ident.span());
     let client_ident = Ident::new(&format!("{}Client", ident), ident.span());
     let mut requests_variants = Vec::new();
     let mut requests_structs = Vec::new();
@@ -203,10 +194,10 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             }
 
             impl #server_ident {
-                pub async fn accept<T>(&self, service: T) -> Option<#other_side_client_ident> 
-                where T: utils::Service + 'static {
+                pub async fn accept<T>(&self, service: T) -> Option<#other_side_client_ident>
+                where (T,): utils::Service<#dummy_ident> + 'static {
                     let (sender, receiver) = self.server.accept().await?;
-                    let client = utils::Client::new(sender, receiver, service);
+                    let client = utils::Client::new(sender, receiver, (service,));
                     Some(#other_side_client_ident {client})
                 }
             }
@@ -214,7 +205,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             pub async fn #create_named_variant_ident<A>(addr: A)
                 -> Result<#server_ident, std::io::Error>
                 where
-                    A: utils::tokio::net::ToSocketAddrs 
+                    A: utils::tokio::net::ToSocketAddrs
             {
                 let server = utils::create_server(addr).await?;
                 Ok(#server_ident { server })
@@ -223,22 +214,23 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
     } else {
         let other_side_snake = other_side.to_string().to_case(Case::Snake);
         let connect_to_ident = Ident::new(&format!("connect_to_{other_side_snake}"), ident.span());
-        println!("CLIENT: {snake_ident:?}");
         quote! {
             pub async fn #connect_to_ident<A, T>(addr: A, service: T)
                 -> Result<#other_side_client_ident, std::io::Error>
                 where
                     A: utils::tokio::net::ToSocketAddrs,
-                    T: utils::Service + 'static,
+                    (T,): utils::Service<#dummy_ident> + 'static,
             {
                 let (sender, mut receiver) = utils::create_client(addr).await?;
-                let client = utils::Client::new(sender, receiver, service);
+                let client = utils::Client::new(sender, receiver, (service,));
                 Ok(#other_side_client_ident { client })
 
 
             }
         }
     };
+
+    let mut trait_methods = Vec::new();
 
     for method in input.methods {
         let pascal = method.ident.to_string().to_case(Case::Pascal);
@@ -256,10 +248,9 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             ReturnType::Default => unit_type,
             ReturnType::Type(_, ref ty) => ty,
         };
-        let response_variant = quote! {
+        response_variants.push(quote! {
             #method_response_ident(#return_ty)
-        };
-        response_variants.push(response_variant);
+        });
 
         let mut args = Vec::new();
         let mut arg_names: Vec<Ident> = Vec::new();
@@ -274,17 +265,16 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
                 #ident: #ty
             });
         }
-        let r#struct = quote! {
+        requests_structs.push(quote! {
             #derive
-            struct #method_request_ident {
+            pub struct #method_request_ident {
                 #(#args),*
             }
-        };
-        requests_structs.push(r#struct);
+        });
 
         let args = method.args;
         let output = method.output;
-        let client_method = quote! {
+        client_methods.push(quote! {
             async fn #method_ident(&self, #(#args),*) #output {
                 let response = self.client
                     .request::<#request_ident, #response_ident>(#request_ident::#method_request_ident(
@@ -297,17 +287,30 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
                     _ => unreachable!()
                 }
             }
-        };
+        });
 
-        client_methods.push(client_method);
-
-        let match_arm = quote! {
-            #request_ident::#method_request_ident(request) => #response_ident::#method_response_ident(self.#method_ident(#(request.#arg_names),*).await),
+        let output_ty = match output {
+            ReturnType::Type(_, ref t) => t,
+            ReturnType::Default => unit_type,
         };
-        service_match_arms.push(match_arm);
+        trait_methods.push(quote! {
+            fn #method_ident(&self, #(#args),*) -> impl std::future::Future<Output = #output_ty> + Send;
+        });
+
+        service_match_arms.push(quote! {
+            #request_ident::#method_request_ident(request) => #response_ident::#method_response_ident(self.0.#method_ident(#(request.#arg_names),*).await),
+        });
     }
 
+    let mut result = quote! {
+        pub trait #ident {
+            #(#trait_methods)*
+        }
+    };
+
     let generated = quote! {
+        pub struct #dummy_ident;
+
         #derive
         pub enum #request_ident {
             #(#requests_variants),*
@@ -326,9 +329,6 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             Response(#response_ident),
         }
 
-        // #derive
-        pub struct #service_ident;
-
         pub struct #client_ident {
             // TODO: this should be prefixed
             client: utils::Client
@@ -338,7 +338,8 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             #(#client_methods)*
         }
 
-        impl Service for #service_ident {
+        impl<T> utils::Service<#dummy_ident> for (T,)
+        where T: #ident + Send + Sync {
             type Request = #request_ident;
             type Response = #response_ident;
 

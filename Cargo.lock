@@ -53,6 +53,17 @@ dependencies = [
 [[package]]
 name = "coordinator"
 version = "0.1.0"
+dependencies = [
+ "futures",
+ "serde",
+ "serde_json",
+ "service",
+ "tokio",
+ "tokio-serde",
+ "tokio-util",
+ "utils",
+ "uuid",
+]
 
 [[package]]
 name = "educe"
