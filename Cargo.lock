@@ -40,6 +40,17 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 [[package]]
 name = "cli"
 version = "0.1.0"
+dependencies = [
+ "futures",
+ "serde",
+ "serde_json",
+ "service",
+ "tokio",
+ "tokio-serde",
+ "tokio-util",
+ "utils",
+ "uuid",
+]
 
 [[package]]
 name = "convert_case"
@@ -511,6 +522,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "thiserror"
+version = "1.0.48"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d6d7a740b8a666a7e828dd00da9c0dc290dff53154ea77ac109281de90589b7"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "1.0.48"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49922ecae66cc8a249b77e68d1d0623c1b2c514f0060c27cdc68bd62a1219d35"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.37",
+]
+
+[[package]]
 name = "tokio"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -616,6 +647,7 @@ dependencies = [
  "serde_json",
  "service",
  "syn 2.0.37",
+ "thiserror",
  "tokio",
  "tokio-serde",
  "tokio-util",
@@ -712,3 +744,14 @@ checksum = "c811ca4a8c853ef420abd8592ba53ddbbac90410fab6903b3e79972a631f7680"
 [[package]]
 name = "worker"
 version = "0.1.0"
+dependencies = [
+ "futures",
+ "serde",
+ "serde_json",
+ "service",
+ "tokio",
+ "tokio-serde",
+ "tokio-util",
+ "utils",
+ "uuid",
+]

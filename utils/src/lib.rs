@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::time::Duration;
 
 use futures::prelude::*;
 use serde::de::DeserializeOwned;
@@ -13,6 +14,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
+use tokio::time::sleep;
 use tokio_serde::formats::*;
 use tokio_util::codec::FramedRead;
 use tokio_util::codec::{FramedWrite, LengthDelimitedCodec};
@@ -28,7 +30,7 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn accept(&self) -> Option<(UnboundedSender<Message>, UnboundedReceiver<Message>)> {
+    pub async fn accept(&self) -> Option<(UnboundedSender<Message>, UnboundedReceiver<Message>, oneshot::Receiver<()>)> {
         let (socket, _) = self.listener.accept().await.ok()?;
         let (reader, writer) = socket.into_split();
 
@@ -48,6 +50,7 @@ impl Server {
 
         let (serialized_sender, mut serialized_receiver) = unbounded_channel::<Message>();
         let (deserialized_sender, deserialized_receiver) = unbounded_channel::<Message>();
+        let (close_sender, close_receiver) = oneshot::channel::<()>();
 
         tokio::spawn(async move {
             while let Some(message) = serialized_receiver.recv().await {
@@ -66,9 +69,13 @@ impl Server {
                     break;
                 }
             }
+
+            if let Err(e) = close_sender.send(()) {
+                println!("Got an error when sending to a close_sender: {e:?}");
+            }
         });
 
-        Some((serialized_sender, deserialized_receiver))
+       Some((serialized_sender, deserialized_receiver, close_receiver))
     }
 }
 
@@ -148,6 +155,7 @@ enum InternalMessage {
 pub struct Client {
     sender: UnboundedSender<Message>,
     internal_sender: UnboundedSender<InternalMessage>,
+    close_receiver: Option<oneshot::Receiver<()>>,
 }
 
 impl Client {
@@ -185,6 +193,7 @@ impl Client {
         sender: UnboundedSender<Message>,
         mut receiver: UnboundedReceiver<Message>,
         service: T,
+        close_receiver: Option<oneshot::Receiver<()>>
     ) -> Self
     where
         T: Service<DummyType> + Send + Sync + 'static,
@@ -195,6 +204,7 @@ impl Client {
         let client = Self {
             sender: sender.clone(),
             internal_sender,
+            close_receiver
         };
 
         tokio::spawn(async move {
@@ -242,6 +252,14 @@ impl Client {
         });
 
         client
+    }
+
+    async fn wait(&mut self) {
+        if let Some(receiver) = self.close_receiver.take() {
+            if let Err(e) = receiver.await {
+                println!("Got an error when waiting for oneshot receiver: {e:?}");
+            }
+        }
     }
 }
 

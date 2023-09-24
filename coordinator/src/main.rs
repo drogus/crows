@@ -4,45 +4,53 @@
 use std::time::Duration;
 
 use tokio::time::sleep;
-use utils::services::{create_coordinator_server, connect_to_coordinator};
-use utils::services::{Worker, Coordinator};
+use utils::services::{create_worker_to_coordinator_server, CoordinatorError, create_coordinator_server};
+use utils::services::{Worker, WorkerToCoordinator, Coordinator};
 
 #[derive(Clone)]
-struct CoordinatorService;
+struct WorkerToCoordinatorService;
 
-impl Coordinator for CoordinatorService {
+impl WorkerToCoordinator for WorkerToCoordinatorService {
     async fn hello(&self, name: String) -> String {
         format!("Hello from Coordinator {name}!")
     }
 }
 
-struct WorkerService;
+#[derive(Clone)]
+struct CoordinatorService;
 
-impl Worker for WorkerService {
-    async fn hello(&self, name: String) -> String {
-        format!("Hello from Worker {name}!")
+impl Coordinator for CoordinatorService {
+    async fn upload_scenario(&self,name:String,content:Vec<u8>) -> Result<(), CoordinatorError> {
+        Ok(())
     }
 }
 
 #[tokio::main]
 pub async fn main() {
     tokio::spawn(async {
-        let server = create_coordinator_server("127.0.0.1:8181").await.unwrap();
-        let service = CoordinatorService {};
+        let server = create_worker_to_coordinator_server("127.0.0.1:8181")
+            .await
+            .unwrap();
+        let service = WorkerToCoordinatorService {};
         while let Some(worker_client) = server.accept(service.clone()).await {
             let response = worker_client.hello("coordinator".into()).await;
             println!("Response from worker: {response:?}");
         }
     });
 
-    sleep(Duration::from_millis(100)).await;
-    let service = WorkerService {};
-    let world_client = connect_to_coordinator("127.0.0.1:8181", service).await.unwrap();
-
-    let response = world_client.hello("worker 1".into()).await;
-    println!("Response from coordinator: {response:?}");
+    tokio::spawn(async {
+        let server = create_coordinator_server("127.0.0.1:8282")
+            .await
+            .unwrap();
+        let service = CoordinatorService {};
+        while let Some(mut client) = server.accept(service.clone()).await {
+            tokio::spawn(async move {
+                // we don't send any messages for the client, so in order to not drop it
+                // (and thus disconnect), we need to wait
+                client.wait().await;
+            });
+        }
+    });
 
     sleep(Duration::from_millis(100000)).await;
 }
-
-

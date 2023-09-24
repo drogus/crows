@@ -196,8 +196,8 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             impl #server_ident {
                 pub async fn accept<T>(&self, service: T) -> Option<#other_side_client_ident>
                 where (T,): utils::Service<#dummy_ident> + 'static {
-                    let (sender, receiver) = self.server.accept().await?;
-                    let client = utils::Client::new(sender, receiver, (service,));
+                    let (sender, receiver, close_receiver) = self.server.accept().await?;
+                    let client = utils::Client::new(sender, receiver, (service,), Some(close_receiver));
                     Some(#other_side_client_ident {client})
                 }
             }
@@ -222,7 +222,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
                     (T,): utils::Service<#dummy_ident> + 'static,
             {
                 let (sender, mut receiver) = utils::create_client(addr).await?;
-                let client = utils::Client::new(sender, receiver, (service,));
+                let client = utils::Client::new(sender, receiver, (service,), None);
                 Ok(#other_side_client_ident { client })
 
 
@@ -332,6 +332,12 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
         pub struct #client_ident {
             // TODO: this should be prefixed
             client: utils::Client
+        }
+
+        impl #client_ident {
+            pub async fn wait(&mut self) {
+                self.client.wait().await;
+            }
         }
 
         impl #ident for #client_ident {
