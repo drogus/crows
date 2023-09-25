@@ -192,7 +192,7 @@ impl Client {
     pub fn new<T, DummyType>(
         sender: UnboundedSender<Message>,
         mut receiver: UnboundedReceiver<Message>,
-        service: T,
+        mut service: T,
         close_receiver: Option<oneshot::Receiver<()>>
     ) -> Self
     where
@@ -276,7 +276,7 @@ pub trait Service<DummyType>: Send + Sync {
     type Request: DeserializeOwned + Send;
 
     fn handle_request(
-        &self,
+        &mut self,
         message: Self::Request,
     ) -> Pin<Box<dyn Future<Output = Self::Response> + Send + '_>>;
 }

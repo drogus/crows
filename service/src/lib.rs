@@ -100,9 +100,11 @@ impl Parse for ServiceMacroInput {
         let vis: Visibility = input.parse()?;
         input.parse::<Token![trait]>()?;
         let ident: Ident = input.parse()?;
+
+        let mut methods = Vec::<Method>::new();
+
         let content;
         braced!(content in input);
-        let mut methods = Vec::<Method>::new();
         while !content.is_empty() {
             methods.push(content.parse()?);
         }
@@ -176,6 +178,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
     let mut client_methods = Vec::new();
     let mut service_match_arms = Vec::new();
 
+
     let snake_ident = ident.to_string().to_case(Case::Snake);
     let variant = attrs.variant;
     let create_named_variant_ident =
@@ -233,6 +236,12 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
     let mut trait_methods = Vec::new();
 
     for method in input.methods {
+        let receiver = if method.receiver_mutability.is_some() {
+            quote! { &mut self }
+        } else {
+            quote! { &self }
+        };
+
         let pascal = method.ident.to_string().to_case(Case::Pascal);
         let method_ident = method.ident.clone();
         let method_request_ident =
@@ -275,7 +284,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
         let args = method.args;
         let output = method.output;
         client_methods.push(quote! {
-            async fn #method_ident(&self, #(#args),*) #output {
+            async fn #method_ident(#receiver, #(#args),*) #output {
                 let response = self.client
                     .request::<#request_ident, #response_ident>(#request_ident::#method_request_ident(
                         #method_request_ident { #(#arg_names),* },
@@ -294,7 +303,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             ReturnType::Default => unit_type,
         };
         trait_methods.push(quote! {
-            fn #method_ident(&self, #(#args),*) -> impl std::future::Future<Output = #output_ty> + Send;
+            fn #method_ident(#receiver, #(#args),*) -> impl std::future::Future<Output = #output_ty> + Send;
         });
 
         service_match_arms.push(quote! {
@@ -350,12 +359,12 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             type Response = #response_ident;
 
             fn handle_request(
-                &self,
+                &mut self,
                 message: Self::Request,
             ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Self::Response> + Send + '_>> {
                 Box::pin(async {
                     match message {
-                        #(#service_match_arms),*
+                        #(#service_match_arms)*
                     }
                 })
             }

@@ -6,21 +6,33 @@ use std::time::Duration;
 use tokio::time::sleep;
 use utils::services::{create_worker_to_coordinator_server, CoordinatorError, create_coordinator_server};
 use utils::services::{Worker, WorkerToCoordinator, Coordinator};
+use uuid::Uuid;
 
 #[derive(Clone)]
-struct WorkerToCoordinatorService;
+struct WorkerData {
+    hostname: String,
+    uuid: Uuid,
+}
+
+#[derive(Clone)]
+struct WorkerToCoordinatorService {
+    workers: Vec<WorkerData>
+}
 
 impl WorkerToCoordinator for WorkerToCoordinatorService {
-    async fn hello(&self, name: String) -> String {
-        format!("Hello from Coordinator {name}!")
+    async fn register(&self, uuid: Uuid, hostname: String) -> Result<(), CoordinatorError> {
+        println!("register worker {uuid}, hostname: {hostname}");
+
+        Ok(())
     }
 }
 
 #[derive(Clone)]
-struct CoordinatorService;
+struct CoordinatorService {
+}
 
 impl Coordinator for CoordinatorService {
-    async fn upload_scenario(&self,name:String,content:Vec<u8>) -> Result<(), CoordinatorError> {
+    async fn upload_scenario(&self, name:String, content:Vec<u8>) -> Result<(), CoordinatorError> {
         Ok(())
     }
 }
@@ -31,10 +43,15 @@ pub async fn main() {
         let server = create_worker_to_coordinator_server("127.0.0.1:8181")
             .await
             .unwrap();
-        let service = WorkerToCoordinatorService {};
-        while let Some(worker_client) = server.accept(service.clone()).await {
-            let response = worker_client.hello("coordinator".into()).await;
-            println!("Response from worker: {response:?}");
+        let service = WorkerToCoordinatorService {
+            workers: Vec::new()
+        };
+        while let Some(mut client) = server.accept(service.clone()).await {
+            println!("Worker connected");
+            // let response = worker_client.hello("coordinator".into()).await;
+            // println!("Response from worker: {response:?}");
+            //
+            client.wait().await;
         }
     });
 
