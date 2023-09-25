@@ -24,6 +24,7 @@ pub use serde;
 pub use tokio;
 pub mod services;
 pub use service;
+mod wasm;
 
 pub struct Server {
     listener: TcpListener,

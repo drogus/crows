@@ -16,3 +16,10 @@ uuid = { version = "1.4.1", features = ["serde", "v4"] }
 service = { path = "../service" }
 syn = { version = "2.0.37", features = ["full", "extra-traits", "fold"] }
 thiserror = "1.0.48"
+
+lunatic-process = "0.13.2"
+lunatic-runtime = "0.13.2"
+lunatic-process-api = "0.13.2"
+lunatic = "0.14.1"
+anyhow = "1.0"
+bincode = "1.3"
