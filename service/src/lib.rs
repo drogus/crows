@@ -53,7 +53,9 @@ struct Method {
 impl Parse for Method {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let attrs = input.call(Attribute::parse_outer)?;
+
         input.parse::<Token![async]>()?;
+
         input.parse::<Token![fn]>()?;
         let ident = input.parse()?;
         let content;
@@ -178,6 +180,16 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
     let mut client_methods = Vec::new();
     let mut service_match_arms = Vec::new();
 
+    #[cfg(feature = "async")]
+    let maybe_async = quote! { async };
+
+    #[cfg(feature = "async")]
+    let maybe_await = quote! { .await };
+
+    #[cfg(not(feature = "async"))]
+    let maybe_async = quote! {};
+    #[cfg(not(feature = "async"))]
+    let maybe_await = quote! {};
 
     let snake_ident = ident.to_string().to_case(Case::Snake);
     let variant = attrs.variant;
@@ -189,6 +201,30 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
         &format!("{}Client", other_side.to_string()),
         other_side.span(),
     );
+
+    #[cfg(feature = "lunatic")]
+    let server_or_client_fn = if &variant == "server" {
+        quote! {}
+    } else {
+        let other_side_snake = other_side.to_string().to_case(Case::Snake);
+        let connect_to_ident = Ident::new(&format!("connect_to_{other_side_snake}"), ident.span());
+        quote! {
+            pub fn #connect_to_ident<A, T>(addr: A, service: T, mailbox: lunatic::Mailbox<String>)
+                -> Result<#other_side_client_ident, std::io::Error>
+                where
+                    A: lunatic::net::ToSocketAddrs,
+                    (T,): utils::Service<#dummy_ident> + utils::serde::de::DeserializeOwned + utils::serde::Serialize,
+                    <(T,) as utils::Service<#dummy_ident>>::Request: utils::serde::de::DeserializeOwned + utils::serde::Serialize,
+                    <(T,) as utils::Service<#dummy_ident>>::Response: utils::serde::de::DeserializeOwned + utils::serde::Serialize,
+            {
+                let (sender, stream) = utils::create_client(addr)?;
+                let client = utils::Client::new(sender, (service,), mailbox, stream);
+                Ok(#other_side_client_ident { client })
+            }
+        }
+    };
+
+    #[cfg(feature = "async")]
     let server_or_client_fn = if &variant == "server" {
         let server_ident = Ident::new(&format!("{}Server", ident), ident.span());
         quote! {
@@ -197,20 +233,20 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             }
 
             impl #server_ident {
-                pub async fn accept<T>(&self, service: T) -> Option<#other_side_client_ident>
+                pub #maybe_async fn accept<T>(&self, service: T) -> Option<#other_side_client_ident>
                 where (T,): utils::Service<#dummy_ident> + 'static {
-                    let (sender, receiver, close_receiver) = self.server.accept().await?;
+                    let (sender, receiver, close_receiver) = self.server.accept()#maybe_await?;
                     let client = utils::Client::new(sender, receiver, (service,), Some(close_receiver));
                     Some(#other_side_client_ident {client})
                 }
             }
 
-            pub async fn #create_named_variant_ident<A>(addr: A)
+            pub #maybe_async fn #create_named_variant_ident<A>(addr: A)
                 -> Result<#server_ident, std::io::Error>
                 where
                     A: utils::tokio::net::ToSocketAddrs
             {
-                let server = utils::create_server(addr).await?;
+                let server = utils::create_server(addr)#maybe_await?;
                 Ok(#server_ident { server })
             }
         }
@@ -218,17 +254,15 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
         let other_side_snake = other_side.to_string().to_case(Case::Snake);
         let connect_to_ident = Ident::new(&format!("connect_to_{other_side_snake}"), ident.span());
         quote! {
-            pub async fn #connect_to_ident<A, T>(addr: A, service: T)
+            pub #maybe_async fn #connect_to_ident<A, T>(addr: A, service: T)
                 -> Result<#other_side_client_ident, std::io::Error>
                 where
                     A: utils::tokio::net::ToSocketAddrs,
                     (T,): utils::Service<#dummy_ident> + 'static,
             {
-                let (sender, mut receiver) = utils::create_client(addr).await?;
+                let (sender, mut receiver) = utils::create_client(addr)#maybe_await?;
                 let client = utils::Client::new(sender, receiver, (service,), None);
                 Ok(#other_side_client_ident { client })
-
-
             }
         }
     };
@@ -282,38 +316,83 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
         });
 
         let args = method.args;
-        let output = method.output;
-        client_methods.push(quote! {
-            async fn #method_ident(#receiver, #(#args),*) #output {
-                let response = self.client
-                    .request::<#request_ident, #response_ident>(#request_ident::#method_request_ident(
-                        #method_request_ident { #(#arg_names),* },
-                    ))
-                    .await;
-
-                match response {
-                    #response_ident::#method_response_ident(r) => r,
-                    _ => unreachable!()
-                }
-            }
-        });
-
-        let output_ty = match output {
+        let output_ty = match method.output {
             ReturnType::Type(_, ref t) => t,
             ReturnType::Default => unit_type,
         };
+
+        client_methods.push(quote! {
+            // TODO: this should not be anyhow, but rather io::error or sth along the lines
+            pub #maybe_async fn #method_ident(#receiver, #(#args),*) -> anyhow::Result<#output_ty> {
+                let response = self.client
+                    .request::<#request_ident, #response_ident>(#request_ident::#method_request_ident(
+                        #method_request_ident { #(#arg_names),* },
+                    ))#maybe_await?;
+
+                Ok(match response {
+                    #response_ident::#method_response_ident(r) => r,
+                    _ => unreachable!()
+                })
+            }
+        });
+
+
+        #[cfg(feature = "async")]
         trait_methods.push(quote! {
             fn #method_ident(#receiver, #(#args),*) -> impl std::future::Future<Output = #output_ty> + Send;
         });
 
+        #[cfg(not(feature = "async"))]
+        trait_methods.push(quote! {
+            fn #method_ident(#receiver, #(#args),*) -> #output_ty;
+        });
+
         service_match_arms.push(quote! {
-            #request_ident::#method_request_ident(request) => #response_ident::#method_response_ident(self.0.#method_ident(#(request.#arg_names),*).await),
+            #request_ident::#method_request_ident(request) => #response_ident::#method_response_ident(self.0.#method_ident(#(request.#arg_names),*)#maybe_await),
         });
     }
 
     let mut result = quote! {
         pub trait #ident {
             #(#trait_methods)*
+        }
+    };
+
+    #[cfg(feature = "async")]
+    let impl_service = quote! {
+        impl<T> utils::Service<#dummy_ident> for (T,)
+        where T: #ident + Send + Sync {
+            type Request = #request_ident;
+            type Response = #response_ident;
+
+            fn handle_request(
+                &mut self,
+                message: Self::Request,
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Self::Response> + Send + '_>> {
+                Box::pin(async {
+                    match message {
+                        #(#service_match_arms)*
+                    }
+                })
+            }
+        }
+    };
+
+    #[cfg(not(feature = "async"))]
+    let impl_service = quote! {
+        impl<T> utils::Service<#dummy_ident> for (T,)
+        where T: #ident {
+            type Request = #request_ident;
+            type Response = #response_ident;
+
+            fn handle_request(
+                &mut self,
+                message: Self::Request,
+            ) -> Self::Response {
+                match message {
+                    #(#service_match_arms)*
+                }
+            }
         }
     };
 
@@ -344,31 +423,14 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
         }
 
         impl #client_ident {
-            pub async fn wait(&mut self) {
-                self.client.wait().await;
+            pub #maybe_async fn wait(&mut self) {
+                self.client.wait()#maybe_await;
             }
-        }
 
-        impl #ident for #client_ident {
             #(#client_methods)*
         }
 
-        impl<T> utils::Service<#dummy_ident> for (T,)
-        where T: #ident + Send + Sync {
-            type Request = #request_ident;
-            type Response = #response_ident;
-
-            fn handle_request(
-                &mut self,
-                message: Self::Request,
-            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Self::Response> + Send + '_>> {
-                Box::pin(async {
-                    match message {
-                        #(#service_match_arms)*
-                    }
-                })
-            }
-        }
+        #impl_service
 
         #server_or_client_fn
     };

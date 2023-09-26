@@ -51,7 +51,10 @@ pub async fn main() {
             // let response = worker_client.hello("coordinator".into()).await;
             // println!("Response from worker: {response:?}");
             //
+            client.upload_scenario("foo".into(), Vec::new()).await;
+            println!("Done");
             client.wait().await;
+            println!("Worker disconnected");
         }
     });
 

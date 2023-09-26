@@ -5,33 +5,51 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::time::Duration;
 
-use futures::prelude::*;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tokio::net::TcpStream;
-use tokio::net::{TcpListener, ToSocketAddrs};
-use tokio::sync::mpsc::unbounded_channel;
-use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::oneshot;
-use tokio::time::sleep;
+use std::ops::Deref;
+
+#[cfg(feature = "async")]
+use futures::prelude::*;
+#[cfg(feature = "async")]
+use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
+#[cfg(feature = "async")]
+use tokio::{
+    sync::{
+        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+        oneshot,
+    },
+    time::sleep,
+};
+#[cfg(feature = "async")]
 use tokio_serde::formats::*;
-use tokio_util::codec::FramedRead;
-use tokio_util::codec::{FramedWrite, LengthDelimitedCodec};
+#[cfg(feature = "async")]
+use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use uuid::Uuid;
 
 pub use serde;
+#[cfg(feature = "async")]
 pub use tokio;
 pub mod services;
 pub use service;
-mod wasm;
 
+#[cfg(feature = "lunatic")]
+use std::io::{Read, Write};
+
+#[cfg(feature = "async")]
 pub struct Server {
     listener: TcpListener,
 }
 
+#[cfg(feature = "async")]
 impl Server {
-    pub async fn accept(&self) -> Option<(UnboundedSender<Message>, UnboundedReceiver<Message>, oneshot::Receiver<()>)> {
+    pub async fn accept(
+        &self,
+    ) -> Option<(
+        UnboundedSender<Message>,
+        UnboundedReceiver<Message>,
+        oneshot::Receiver<()>,
+    )> {
         let (socket, _) = self.listener.accept().await.ok()?;
         let (reader, writer) = socket.into_split();
 
@@ -76,10 +94,11 @@ impl Server {
             }
         });
 
-       Some((serialized_sender, deserialized_receiver, close_receiver))
+        Some((serialized_sender, deserialized_receiver, close_receiver))
     }
 }
 
+#[cfg(feature = "async")]
 pub async fn create_server<A>(addr: A) -> Result<Server, std::io::Error>
 where
     A: ToSocketAddrs,
@@ -92,6 +111,50 @@ where
     Ok(Server { listener })
 }
 
+#[cfg(feature = "lunatic")]
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+
+#[cfg(feature = "lunatic")]
+pub fn process_write_loop(write: &mut lunatic::net::TcpStream, mailbox: &Mailbox<Message>) -> anyhow::Result<()> {
+    let message = mailbox.receive();
+    let str = serde_json::to_string(&message)?;
+    let bytes = str.as_bytes();
+    let len = bytes.len();
+    let mut len_bytes = vec![];
+    len_bytes.write_u32::<BigEndian>(len as u32)?;
+
+    let mut reply = vec![];
+    reply.extend_from_slice(&len_bytes);
+    reply.extend_from_slice(bytes);
+
+    write.write(&reply)?;
+
+    Ok(())
+}
+
+#[cfg(feature = "lunatic")]
+pub fn create_client<A>(
+    addr: A,
+) -> Result<(Process<Message>, lunatic::net::TcpStream), std::io::Error>
+where
+    A: lunatic::net::ToSocketAddrs,
+{
+    let stream = lunatic::net::TcpStream::connect(addr)?;
+
+    let write = stream.clone();
+    let sender = spawn_link!(|write, mailbox: Mailbox<Message>| { loop {
+        // TODO: I should probably just close the loop in case of some specific errors, like for
+        // example a problem with writing to the stream, but at the moment it's just a catch all,
+        // cause I don't have time
+        if let Err(e) = process_write_loop(&mut write, &mailbox) {
+            println!("Got an error while processing the write loop: {e:?}");
+        }
+    } });
+
+    Ok((sender, stream))
+}
+
+#[cfg(feature = "async")]
 pub async fn create_client<A>(
     addr: A,
 ) -> Result<(UnboundedSender<Message>, UnboundedReceiver<Message>), std::io::Error>
@@ -142,23 +205,27 @@ where
     Ok((serialized_sender, deserialized_receiver))
 }
 
+#[cfg(feature = "async")]
 #[derive(Debug)]
 struct RegisterListener {
     respond_to: oneshot::Sender<String>,
     message_id: Uuid,
 }
 
+#[cfg(feature = "async")]
 #[derive(Debug)]
 enum InternalMessage {
     RegisterListener(RegisterListener),
 }
 
+#[cfg(feature = "async")]
 pub struct Client {
     sender: UnboundedSender<Message>,
     internal_sender: UnboundedSender<InternalMessage>,
     close_receiver: Option<oneshot::Receiver<()>>,
 }
 
+#[cfg(feature = "async")]
 impl Client {
     pub async fn request<
         T: Serialize + std::fmt::Debug + DeserializeOwned + Send + 'static,
@@ -166,7 +233,7 @@ impl Client {
     >(
         &self,
         message: T,
-    ) -> Y {
+    ) -> anyhow::Result<Y> {
         let message = Message {
             id: Uuid::new_v4(),
             reply_to: None,
@@ -184,9 +251,10 @@ impl Client {
             .unwrap();
         self.sender.send(message).unwrap();
 
+        // TODO: rewrite to map
         match rx.await {
-            Ok(reply) => serde_json::from_str(&reply).unwrap(),
-            Err(e) => panic!("error: {e:?}"),
+            Ok(reply) => Ok(serde_json::from_str(&reply)?),
+            Err(e) => Err(e)?,
         }
     }
 
@@ -194,7 +262,7 @@ impl Client {
         sender: UnboundedSender<Message>,
         mut receiver: UnboundedReceiver<Message>,
         mut service: T,
-        close_receiver: Option<oneshot::Receiver<()>>
+        close_receiver: Option<oneshot::Receiver<()>>,
     ) -> Self
     where
         T: Service<DummyType> + Send + Sync + 'static,
@@ -205,7 +273,7 @@ impl Client {
         let client = Self {
             sender: sender.clone(),
             internal_sender,
-            close_receiver
+            close_receiver,
         };
 
         tokio::spawn(async move {
@@ -218,7 +286,9 @@ impl Client {
                                 // println!("Got a message: {:?}", message);
                                 if let Some(reply_to) = message.reply_to {
                                     let reply = listeners.remove(&reply_to).unwrap();
-                                    reply.send(message.message).unwrap();
+                                    if reply.send(message.message).is_err() {
+                                        break;
+                                    }
                                 } else {
                                     let deserialized = serde_json::from_str::<<T as Service<DummyType>>::Request>(&message.message).unwrap();
                                     let response = service.handle_request(deserialized).await;
@@ -266,12 +336,13 @@ impl Client {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Message {
-    id: Uuid,
-    reply_to: Option<Uuid>,
-    message: String,
-    message_type: String,
+    pub id: Uuid,
+    pub reply_to: Option<Uuid>,
+    pub message: String,
+    pub message_type: String,
 }
 
+#[cfg(feature = "async")]
 pub trait Service<DummyType>: Send + Sync {
     type Response: Send + Serialize;
     type Request: DeserializeOwned + Send;
@@ -280,4 +351,192 @@ pub trait Service<DummyType>: Send + Sync {
         &mut self,
         message: Self::Request,
     ) -> Pin<Box<dyn Future<Output = Self::Response> + Send + '_>>;
+}
+
+#[cfg(feature = "lunatic")]
+use lunatic::{
+    net::{self, TcpStream},
+    spawn_link, Mailbox, MessageSignal, Process, ProcessDiedSignal,
+};
+
+#[cfg(feature = "lunatic")]
+use lunatic_message_request::{MessageRequest, ProcessRequest};
+
+#[cfg(feature = "lunatic")]
+pub trait Service<DummyType> {
+    type Response: Serialize;
+    type Request: DeserializeOwned;
+
+    fn handle_request(&mut self, message: Self::Request) -> Self::Response;
+}
+
+#[cfg(feature = "lunatic")]
+struct Client {
+    sender: Process<Message>,
+    internal_sender: Process<InternalMessage>,
+    mailbox: Mailbox<String>,
+    receiver: Process<Message>,
+}
+
+#[cfg(feature = "lunatic")]
+#[derive(Serialize, Deserialize, Debug)]
+struct RegisterListener {
+    message_id: Uuid,
+    respond_to: Process<String>,
+}
+
+#[cfg(feature = "lunatic")]
+#[derive(Serialize, Deserialize)]
+enum InternalMessage {
+    RegisterListener((Uuid, Process<String>)),
+    RemoveListener(MessageRequest<Uuid, Process<String>>),
+}
+
+#[cfg(feature = "lunatic")]
+impl Client {
+    pub fn new<T, DummyType>(
+        sender: Process<Message>,
+        service: T,
+        mailbox: Mailbox<String>,
+        stream: lunatic::net::TcpStream,
+    ) -> Self
+    where
+        T: Service<DummyType> + Serialize + DeserializeOwned,
+        <T as Service<DummyType>>::Request: Serialize + DeserializeOwned,
+        <T as Service<DummyType>>::Response: Serialize + DeserializeOwned,
+    {
+        let internal_sender = spawn_link!(|mailbox: Mailbox<InternalMessage>| {
+            let mut listeners: HashMap<Uuid, Process<String>> = Default::default();
+
+            loop {
+                let message = mailbox.receive();
+                match message {
+                    InternalMessage::RegisterListener(listener) => {
+                        listeners.insert(listener.0, listener.1);
+                    }
+                    InternalMessage::RemoveListener(req) => {
+                        let uuid = req.deref();
+                        let reply = listeners.remove(uuid).unwrap();
+                        req.reply(reply);
+                    }
+                };
+            }
+        });
+
+        let args = (service, sender, internal_sender.clone());
+        let message_handle = spawn_link!(|args, mailbox: Mailbox<Message>| {
+            let (service, mut sender, internal_sender) = args;
+            let mut service = service;
+            loop {
+                let message = mailbox.receive();
+                if let Some(reply_to) = message.reply_to {
+                    let listener =
+                        internal_sender.request(InternalMessage::RemoveListener, reply_to);
+
+                    listener.send(message.message);
+                } else {
+                    let deserialized = serde_json::from_str::<<T as Service<DummyType>>::Request>(
+                        &message.message,
+                    )
+                    .unwrap();
+                    let response = service.handle_request(deserialized);
+
+                    let reply = Message {
+                        id: Uuid::new_v4(),
+                        reply_to: Some(message.id),
+                        message: serde_json::to_string(&response).unwrap(),
+                        message_type: std::any::type_name::<T>().to_string(),
+                    };
+
+                    sender.send(reply);
+                }
+            }
+        });
+
+        let args = (stream, message_handle);
+        spawn_link!(|args, m: Mailbox<()>| {
+            let (mut read, message_handle) = args;
+            loop {
+                let mut length_buffer = [0u8; 4];
+                read.read(&mut length_buffer).unwrap();
+                let len = as_u32_be(&length_buffer) as usize;
+                println!("Frame length: {}", len);
+                let mut message_buffer = vec![0u8; len];
+
+                if read.read_exact(&mut message_buffer).is_err() {
+                    break;
+                }
+
+                let message = String::from_utf8(message_buffer).unwrap();
+                let message: Message = serde_json::from_str(&message).unwrap();
+                message_handle.send(message);
+            }
+        });
+
+        Self {
+            sender,
+            internal_sender,
+            mailbox,
+            receiver: message_handle,
+        }
+    }
+
+    pub fn request<
+        T: Serialize + std::fmt::Debug + DeserializeOwned,
+        Y: Serialize + std::fmt::Debug + DeserializeOwned,
+    >(
+        &self,
+        message: T,
+    ) -> anyhow::Result<Y> {
+        let message = Message {
+            id: Uuid::new_v4(),
+            reply_to: None,
+            message: serde_json::to_string(&message).unwrap(),
+            message_type: std::any::type_name::<T>().to_string(),
+        };
+
+        let mailbox = self.mailbox.monitorable();
+        let process = Process::spawn(mailbox.this(), reply_to_process);
+        mailbox.monitor(process);
+
+        let register_data = (message.id, process);
+        self.internal_sender
+            .send(InternalMessage::RegisterListener(register_data));
+        self.sender.send(message);
+
+        loop {
+            match mailbox.receive() {
+                MessageSignal::Message(reply) => {
+                    return Ok(serde_json::from_str(&reply)?);
+                }
+                MessageSignal::Signal(ProcessDiedSignal(id)) => {
+                    println!("Process {id} died");
+                    return Err(anyhow::anyhow!("Didn't get a reply"));
+                }
+            }
+        }
+    }
+
+    fn wait(&mut self) {
+        todo!()
+        // if let Some(receiver) = self.close_receiver.take() {
+        //     if let Err(e) = receiver.await {
+        //         println!("Got an error when waiting for oneshot receiver: {e:?}");
+        //     }
+        // }
+    }
+}
+
+#[cfg(feature = "lunatic")]
+fn reply_to_process(parent: Process<String>, mailbox: Mailbox<String>) {
+    let message = mailbox.receive();
+    parent.send(message);
+}
+
+#[cfg(feature = "lunatic")]
+fn as_u32_be(array: &[u8; 4]) -> u32 {
+    ((array[0] as u32) << 24)
+        + ((array[1] as u32) << 16)
+        + ((array[2] as u32) << 8)
+        + ((array[3] as u32) << 0)
 }
