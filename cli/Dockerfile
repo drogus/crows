@@ -23,4 +23,4 @@ COPY --from=builder /usr/src/app/target/release/cli /app/app
 
 WORKDIR /app
 
-CMD ["/app/app"]
+ENTRYPOINT ["/app/app"]
