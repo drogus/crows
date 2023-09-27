@@ -336,7 +336,6 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             }
         });
 
-
         #[cfg(feature = "async")]
         trait_methods.push(quote! {
             fn #method_ident(#receiver, #(#args),*) -> impl std::future::Future<Output = #output_ty> + Send;
@@ -376,6 +375,16 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
                 })
             }
         }
+    };
+
+    #[cfg(not(feature = "async"))]
+    let get_close_receiver = quote! {};
+
+    #[cfg(feature = "async")]
+    let get_close_receiver = quote! {
+        pub fn get_close_receiver(&mut self) -> Option<tokio::sync::oneshot::Receiver<()>> {
+                self.client.get_close_receiver()
+            }
     };
 
     #[cfg(not(feature = "async"))]
@@ -426,6 +435,8 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             pub #maybe_async fn wait(&mut self) {
                 self.client.wait()#maybe_await;
             }
+
+            #get_close_receiver
 
             #(#client_methods)*
         }

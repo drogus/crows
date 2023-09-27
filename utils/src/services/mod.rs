@@ -14,6 +14,8 @@ pub enum CoordinatorError {
 pub enum WorkerError {
     #[error("could not upload a module")]
     UploadModuleError,
+    #[error("could not find a requested scenario")]
+    ScenarioNotFound,
 }
 
 // TODO: I don't like the fact that I need to specify the "other_side"
@@ -21,19 +23,28 @@ pub enum WorkerError {
 // all the trait definitions wouldn't have to be here
 #[service(variant = "server", other_side = Worker)]
 pub trait WorkerToCoordinator {
-    async fn register(&self, uuid: Uuid, hostname: String) -> Result<(), CoordinatorError>;
+    async fn ping(&mut self) -> String;
 }
 
 #[service(variant = "server", other_side = Client)]
 pub trait Coordinator {
     async fn upload_scenario(name: String, content: Vec<u8>) -> Result<(), CoordinatorError>;
+    async fn start(name: String, concurrency: usize);
+    async fn list_workers() -> Vec<String>;
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct WorkerData {
+    pub id: Uuid,
+    pub hostname: String,
 }
 
 #[service(variant = "client", other_side = WorkerToCoordinator)]
 pub trait Worker {
-    async fn upload_scenario(&mut self, name: String, content: Vec<u8>) -> Result<(), WorkerError>;
+    async fn upload_scenario(&mut self, name: String, content: Vec<u8>);
     async fn ping(&self) -> String;
-    async fn start(&self, name: String);
+    async fn start(&self, name: String, concurrency: usize) -> Result<(), WorkerError>;
+    async fn get_data(&self) -> WorkerData;
 }
 
 #[service(variant = "client", other_side = Coordinator)]

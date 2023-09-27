@@ -1,3 +1,4 @@
+[workspace]
 [package]
 name = "worker"
 version = "0.1.0"
@@ -6,12 +7,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-utils = { path = "../utils" }
-serde = { version = "1.0", features = ["derive"] }
-tokio = { version = "1.20", features = ["full"] }
-serde_json = "1.0.106"
-tokio-serde = { version = "0.8.0", features = ["json"] }
-tokio-util = { version = "0.7.3", features = ["full"] }
-futures = "0.3.21"
+lunatic = "0.14"
+serde = "1"
 uuid = { version = "1.4.1", features = ["serde", "v4"] }
-service = { path = "../service" }
+serde_json = "1"
+thiserror = "1"
+utils = { path = "../utils", features = ["lunatic"] }
+anyhow = "1"
+byteorder = "1.4"
+lunatic-message-request = { path = "../lunatic-message-request"}
+service = { path = "../service", features = ["lunatic"] }
+
+[depdendencies.service]
+features = ["lunatic"]

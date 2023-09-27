@@ -115,7 +115,10 @@ where
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 #[cfg(feature = "lunatic")]
-pub fn process_write_loop(write: &mut lunatic::net::TcpStream, mailbox: &Mailbox<Message>) -> anyhow::Result<()> {
+pub fn process_write_loop(
+    write: &mut lunatic::net::TcpStream,
+    mailbox: &Mailbox<Message>,
+) -> anyhow::Result<()> {
     let message = mailbox.receive();
     let str = serde_json::to_string(&message)?;
     let bytes = str.as_bytes();
@@ -142,14 +145,16 @@ where
     let stream = lunatic::net::TcpStream::connect(addr)?;
 
     let write = stream.clone();
-    let sender = spawn_link!(|write, mailbox: Mailbox<Message>| { loop {
-        // TODO: I should probably just close the loop in case of some specific errors, like for
-        // example a problem with writing to the stream, but at the moment it's just a catch all,
-        // cause I don't have time
-        if let Err(e) = process_write_loop(&mut write, &mailbox) {
-            println!("Got an error while processing the write loop: {e:?}");
+    let sender = spawn_link!(|write, mailbox: Mailbox<Message>| {
+        loop {
+            // TODO: I should probably just close the loop in case of some specific errors, like for
+            // example a problem with writing to the stream, but at the moment it's just a catch all,
+            // cause I don't have time
+            if let Err(e) = process_write_loop(&mut write, &mailbox) {
+                println!("Got an error while processing the write loop: {e:?}");
+            }
         }
-    } });
+    });
 
     Ok((sender, stream))
 }
@@ -237,7 +242,7 @@ impl Client {
         let message = Message {
             id: Uuid::new_v4(),
             reply_to: None,
-            message: serde_json::to_string(&message).unwrap(),
+            message: serde_json::to_string(&message)?,
             message_type: std::any::type_name::<T>().to_string(),
         };
 
@@ -247,9 +252,8 @@ impl Client {
             message_id: message.id,
         };
         self.internal_sender
-            .send(InternalMessage::RegisterListener(register_listener))
-            .unwrap();
-        self.sender.send(message).unwrap();
+            .send(InternalMessage::RegisterListener(register_listener))?;
+        self.sender.send(message)?;
 
         // TODO: rewrite to map
         match rx.await {
@@ -325,7 +329,11 @@ impl Client {
         client
     }
 
-    async fn wait(&mut self) {
+    pub fn get_close_receiver(&mut self) -> Option<oneshot::Receiver<()>> {
+        self.close_receiver.take()
+    }
+
+    pub async fn wait(&mut self) {
         if let Some(receiver) = self.close_receiver.take() {
             if let Err(e) = receiver.await {
                 println!("Got an error when waiting for oneshot receiver: {e:?}");
@@ -376,6 +384,7 @@ struct Client {
     internal_sender: Process<InternalMessage>,
     mailbox: Mailbox<String>,
     receiver: Process<Message>,
+    close_mailbox: Mailbox<std::string::String, lunatic::serializer::Bincode, ProcessDiedSignal>,
 }
 
 #[cfg(feature = "lunatic")]
@@ -405,6 +414,9 @@ impl Client {
         <T as Service<DummyType>>::Request: Serialize + DeserializeOwned,
         <T as Service<DummyType>>::Response: Serialize + DeserializeOwned,
     {
+        let close_mailbox = mailbox.monitorable();
+        close_mailbox.monitor(sender);
+
         let internal_sender = spawn_link!(|mailbox: Mailbox<InternalMessage>| {
             let mut listeners: HashMap<Uuid, Process<String>> = Default::default();
 
@@ -460,16 +472,18 @@ impl Client {
                 let mut length_buffer = [0u8; 4];
                 read.read(&mut length_buffer).unwrap();
                 let len = as_u32_be(&length_buffer) as usize;
-                println!("Frame length: {}", len);
-                let mut message_buffer = vec![0u8; len];
+                if len > 0 {
+                    println!("Frame size: {len}");
+                    let mut message_buffer = vec![0u8; len];
 
-                if read.read_exact(&mut message_buffer).is_err() {
-                    break;
+                    if read.read_exact(&mut message_buffer).is_err() {
+                        break;
+                    }
+
+                    let message = String::from_utf8(message_buffer).unwrap();
+                    let message: Message = serde_json::from_str(&message).unwrap();
+                    message_handle.send(message);
                 }
-
-                let message = String::from_utf8(message_buffer).unwrap();
-                let message: Message = serde_json::from_str(&message).unwrap();
-                message_handle.send(message);
             }
         });
 
@@ -478,6 +492,7 @@ impl Client {
             internal_sender,
             mailbox,
             receiver: message_handle,
+            close_mailbox,
         }
     }
 
@@ -507,6 +522,7 @@ impl Client {
         loop {
             match mailbox.receive() {
                 MessageSignal::Message(reply) => {
+                    mailbox.stop_monitoring(process);
                     return Ok(serde_json::from_str(&reply)?);
                 }
                 MessageSignal::Signal(ProcessDiedSignal(id)) => {
@@ -518,12 +534,14 @@ impl Client {
     }
 
     fn wait(&mut self) {
-        todo!()
-        // if let Some(receiver) = self.close_receiver.take() {
-        //     if let Err(e) = receiver.await {
-        //         println!("Got an error when waiting for oneshot receiver: {e:?}");
-        //     }
-        // }
+        loop {
+            match self.close_mailbox.receive() {
+                MessageSignal::Signal(ProcessDiedSignal(_)) => {
+                    break;
+                }
+                _ => { }
+            }
+        }
     }
 }
 
@@ -531,6 +549,9 @@ impl Client {
 fn reply_to_process(parent: Process<String>, mailbox: Mailbox<String>) {
     let message = mailbox.receive();
     parent.send(message);
+    // TODO: I totally don't like it. we can't exit this process until the parent process processes
+    // the reply, not sure how to do it better at the moment
+    lunatic::sleep(std::time::Duration::from_secs(1));
 }
 
 #[cfg(feature = "lunatic")]
