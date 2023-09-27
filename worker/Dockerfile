@@ -30,4 +30,5 @@ WORKDIR /app
 
 ENV WORKER_NAME=$HOST
 
-CMD ["sh", "-c", "/app/lunatic worker.wasm $WORKER_NAME"]
+ENTRYPOINT ["sh", "-c", "/app/lunatic worker.wasm"]
+CMD ["127.0.0.1:8181", "$WORKER_NAME"]
