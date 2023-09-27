@@ -18,6 +18,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         libssl1.1 \
+        sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /app
@@ -27,6 +28,6 @@ COPY --from=builder /app/lunatic /app/lunatic
 
 WORKDIR /app
 
-EXPOSE 8080
+ENV WORKER_NAME=$HOST
 
-CMD ["/app/lunatic", "worker.wasm", "$(hostname)"]
+CMD ["sh", "-c", "/app/lunatic worker.wasm $WORKER_NAME"]

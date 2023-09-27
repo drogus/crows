@@ -84,13 +84,22 @@ impl Coordinator for CoordinatorService {
 
 #[tokio::main]
 pub async fn main() {
+    let worker_port: usize = std::env::var("WORKER_PORT")
+        .unwrap_or("8181".into())
+        .parse()
+        .unwrap();
+    let client_port: usize = std::env::var("CLIENT_PORT")
+        .unwrap_or("8282".into())
+        .parse()
+        .unwrap();
+
     let original_scenarios: Arc<Mutex<HashMap<String, Vec<u8>>>> = Default::default();
     let original_workers: Arc<Mutex<HashMap<Uuid, WorkerEntry>>> = Default::default();
 
     let scenarios = original_scenarios.clone();
     let workers = original_workers.clone();
     tokio::spawn(async move {
-        let server = create_worker_to_coordinator_server("127.0.0.1:8181")
+        let server = create_worker_to_coordinator_server(format!("0.0.0.0:{worker_port}"))
             .await
             .unwrap();
 
@@ -157,7 +166,9 @@ pub async fn main() {
     let scenarios = original_scenarios.clone();
     let workers = original_workers.clone();
     tokio::spawn(async move {
-        let server = create_coordinator_server("127.0.0.1:8282").await.unwrap();
+        let server = create_coordinator_server(format!("0.0.0.0:{client_port}"))
+            .await
+            .unwrap();
         let service = CoordinatorService { scenarios, workers };
 
         while let Some(mut client) = server.accept(service.clone()).await {

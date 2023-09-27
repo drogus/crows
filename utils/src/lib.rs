@@ -287,7 +287,6 @@ impl Client {
                     message = receiver.recv() => {
                         match message {
                             Some(message) => {
-                                // println!("Got a message: {:?}", message);
                                 if let Some(reply_to) = message.reply_to {
                                     let reply = listeners.remove(&reply_to).unwrap();
                                     if reply.send(message.message).is_err() {
@@ -314,7 +313,6 @@ impl Client {
                             Some(internal_message) => {
                                 match internal_message {
                                     InternalMessage::RegisterListener(register_listener) => {
-                                        // println!("register_listener {:?}", register_listener);
                                         listeners.insert(register_listener.message_id, register_listener.respond_to);
                                     }
                                 }
@@ -473,7 +471,6 @@ impl Client {
                 read.read(&mut length_buffer).unwrap();
                 let len = as_u32_be(&length_buffer) as usize;
                 if len > 0 {
-                    println!("Frame size: {len}");
                     let mut message_buffer = vec![0u8; len];
 
                     if read.read_exact(&mut message_buffer).is_err() {

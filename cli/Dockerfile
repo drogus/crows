@@ -7,7 +7,7 @@ RUN apt-get install -y protobuf-compiler
 
 COPY . .
 
-RUN cd coordinator && cargo build --release
+RUN cd cli && cargo build --release
 
 FROM debian:buster
 
@@ -19,11 +19,8 @@ RUN apt-get update \
 
 RUN mkdir -p /app
 
-COPY --from=builder /usr/src/app/target/release/coordinator /app/app
+COPY --from=builder /usr/src/app/target/release/cli /app/app
 
 WORKDIR /app
-
-EXPOSE 8181
-EXPOSE 8282
 
 CMD ["/app/app"]

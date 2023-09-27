@@ -104,14 +104,19 @@ impl Worker for WorkerService {
 
 #[lunatic::main]
 fn main(mailbox: Mailbox<()>) {
-    let args = args_os();
-    let hostname = args.skip(1).next().unwrap().to_str().unwrap().to_string();
+    let mut args = args_os().skip(1);
+    let coordinator_address = args.next().unwrap().to_str().unwrap().to_string();
+    let hostname = args.next().unwrap().to_str().unwrap().to_string();
+
     println!("Starting with hostname: {hostname}");
     loop {
         let mailbox = mailbox.monitorable();
 
         let hostname = hostname.clone();
-        let main_process = spawn!(|hostname, mailbox: Mailbox<String>| {
+        let coordinator_address = coordinator_address.clone();
+        let args = (coordinator_address, hostname);
+        let main_process = spawn!(|args, mailbox: Mailbox<String>| {
+            let (coordinator_address, hostname) = args;
             let scenarios: HashMap<String, Vec<u8>> = Default::default();
             let service = WorkerService {
                 scenarios,
@@ -119,8 +124,9 @@ fn main(mailbox: Mailbox<()>) {
                 hostname,
             };
 
+            println!("Connecting to {coordinator_address}");
             let mut client =
-                connect_to_worker_to_coordinator("127.0.0.1:8181", service, mailbox).unwrap();
+                connect_to_worker_to_coordinator(coordinator_address, service, mailbox).unwrap();
 
             loop {
                 client.ping().unwrap();

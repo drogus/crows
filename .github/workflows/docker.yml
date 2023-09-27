@@ -15,6 +15,9 @@ jobs:
           - dockerfile: ./coordinator/Dockerfile
             image: drogus/crows-coordinator
             context: .
+          - dockerfile: ./cli/Dockerfile
+            image: drogus/crows-client
+            context: .
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -28,6 +31,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=sha
+            latest
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
       # So now you can use Actions' own caching!
