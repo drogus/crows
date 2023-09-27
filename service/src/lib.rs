@@ -193,6 +193,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
 
     let snake_ident = ident.to_string().to_case(Case::Snake);
     let variant = attrs.variant;
+    #[allow(unused)]
     let create_named_variant_ident =
         Ident::new(&format!("create_{snake_ident}_{variant}"), ident.span());
     // let create_variant_ident = Ident::new(&format!("create_{variant}"), ident.span());
@@ -203,6 +204,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
     );
 
     #[cfg(feature = "lunatic")]
+    #[allow(unused)]
     let server_or_client_fn = if &variant == "server" {
         quote! {}
     } else {

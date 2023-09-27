@@ -1,36 +1,14 @@
-use lunatic_message_request::{MessageRequest, ProcessRequest};
-
-use std::{
-    collections::HashMap,
-    env::args_os,
-    io::{BufRead, BufReader, Read, Write},
-    ops::Deref,
-    ptr::read,
-    rc::Rc,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use std::{collections::HashMap, env::args_os, time::Duration};
 
 use lunatic::{
-    net::{self, TcpStream},
-    serializer::Bincode,
-    sleep, spawn, spawn_link, Mailbox, MessageSignal, Process, ProcessDiedSignal, WasmModule,
+    serializer::Bincode, sleep, spawn, Mailbox, MessageSignal, Process, ProcessDiedSignal,
+    WasmModule,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use thiserror::Error;
+use serde::{Deserialize, Serialize};
+
 use uuid::Uuid;
 
-use std::sync::mpsc::channel;
-
-use utils::{
-    services::{
-        connect_to_worker_to_coordinator, Client, CoordinatorClient, DummyWorkerService, Worker,
-        WorkerData, WorkerError,
-    },
-    Message, Service,
-};
+use utils::services::{connect_to_worker_to_coordinator, Worker, WorkerData, WorkerError};
 
 #[derive(Serialize, Deserialize, Clone)]
 struct WorkerService {
@@ -56,7 +34,7 @@ impl Worker for WorkerService {
             .clone();
 
         let args = (scenario, name, concurrency);
-        let process = spawn!(|args, mailbox: Mailbox<()>| {
+        let _process = spawn!(|args, mailbox: Mailbox<()>| {
             let (scenario, name, concurrency) = args;
 
             println!("Running {name} scenario with {concurrency} concurrency.");
@@ -136,13 +114,10 @@ fn main(mailbox: Mailbox<()>) {
         mailbox.monitor(main_process);
 
         loop {
-            match mailbox.receive() {
-                MessageSignal::Signal(ProcessDiedSignal(id)) => {
-                    println!("Process {id} died, reconnecing in 5s");
-                    sleep(Duration::from_secs(5));
-                    break;
-                }
-                _ => {}
+            if let MessageSignal::Signal(ProcessDiedSignal(id)) = mailbox.receive() {
+                println!("Process {id} died, reconnecing in 5s");
+                sleep(Duration::from_secs(5));
+                break;
             }
         }
     }

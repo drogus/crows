@@ -1,8 +1,6 @@
-use std::time::Duration;
-
 use lunatic::{
     serializer::{Bincode, CanSerialize},
-    Mailbox, MailboxResult, Tag,
+    Mailbox, Tag,
 };
 use serde::{Deserialize, Serialize};
 

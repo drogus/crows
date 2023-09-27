@@ -1,8 +1,8 @@
-use service::service;
-use uuid::Uuid;
 use crate as utils;
+use serde::{Deserialize, Serialize};
+use service::service;
 use thiserror::Error;
-use serde::{Serialize, Deserialize};
+use uuid::Uuid;
 
 #[derive(Error, Debug, Serialize, Deserialize, Clone)]
 pub enum CoordinatorError {
@@ -48,6 +48,4 @@ pub trait Worker {
 }
 
 #[service(variant = "client", other_side = Coordinator)]
-pub trait Client {
-    
-}
+pub trait Client {}

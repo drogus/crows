@@ -1,9 +1,8 @@
 #![feature(async_fn_in_trait)]
 #![feature(return_position_impl_trait_in_trait)]
 
-use std::collections::HashMap;
 use std::pin::Pin;
-use std::time::Duration;
+use std::collections::HashMap;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -35,6 +34,15 @@ pub use service;
 
 #[cfg(feature = "lunatic")]
 use std::io::{Read, Write};
+
+#[cfg(feature = "lunatic")]
+use lunatic::{net::TcpStream, spawn_link, Mailbox, MessageSignal, Process, ProcessDiedSignal};
+
+#[cfg(feature = "lunatic")]
+use lunatic_message_request::{MessageRequest, ProcessRequest};
+
+#[cfg(feature = "lunatic")]
+use byteorder::{BigEndian, WriteBytesExt};
 
 #[cfg(feature = "async")]
 pub struct Server {
@@ -112,13 +120,7 @@ where
 }
 
 #[cfg(feature = "lunatic")]
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-
-#[cfg(feature = "lunatic")]
-pub fn process_write_loop(
-    write: &mut lunatic::net::TcpStream,
-    mailbox: &Mailbox<Message>,
-) -> anyhow::Result<()> {
+pub fn process_write_loop(write: &mut TcpStream, mailbox: &Mailbox<Message>) -> anyhow::Result<()> {
     let message = mailbox.receive();
     let str = serde_json::to_string(&message)?;
     let bytes = str.as_bytes();
@@ -136,13 +138,11 @@ pub fn process_write_loop(
 }
 
 #[cfg(feature = "lunatic")]
-pub fn create_client<A>(
-    addr: A,
-) -> Result<(Process<Message>, lunatic::net::TcpStream), std::io::Error>
+pub fn create_client<A>(addr: A) -> Result<(Process<Message>, TcpStream), std::io::Error>
 where
     A: lunatic::net::ToSocketAddrs,
 {
-    let stream = lunatic::net::TcpStream::connect(addr)?;
+    let stream = TcpStream::connect(addr)?;
 
     let write = stream.clone();
     let sender = spawn_link!(|write, mailbox: Mailbox<Message>| {
@@ -360,15 +360,6 @@ pub trait Service<DummyType>: Send + Sync {
 }
 
 #[cfg(feature = "lunatic")]
-use lunatic::{
-    net::{self, TcpStream},
-    spawn_link, Mailbox, MessageSignal, Process, ProcessDiedSignal,
-};
-
-#[cfg(feature = "lunatic")]
-use lunatic_message_request::{MessageRequest, ProcessRequest};
-
-#[cfg(feature = "lunatic")]
 pub trait Service<DummyType> {
     type Response: Serialize;
     type Request: DeserializeOwned;
@@ -376,6 +367,7 @@ pub trait Service<DummyType> {
     fn handle_request(&mut self, message: Self::Request) -> Self::Response;
 }
 
+#[allow(dead_code)]
 #[cfg(feature = "lunatic")]
 struct Client {
     sender: Process<Message>,
@@ -405,7 +397,7 @@ impl Client {
         sender: Process<Message>,
         service: T,
         mailbox: Mailbox<String>,
-        stream: lunatic::net::TcpStream,
+        stream: TcpStream,
     ) -> Self
     where
         T: Service<DummyType> + Serialize + DeserializeOwned,
@@ -435,7 +427,7 @@ impl Client {
 
         let args = (service, sender, internal_sender.clone());
         let message_handle = spawn_link!(|args, mailbox: Mailbox<Message>| {
-            let (service, mut sender, internal_sender) = args;
+            let (service, sender, internal_sender) = args;
             let mut service = service;
             loop {
                 let message = mailbox.receive();
@@ -464,7 +456,7 @@ impl Client {
         });
 
         let args = (stream, message_handle);
-        spawn_link!(|args, m: Mailbox<()>| {
+        spawn_link!(|args, _m: Mailbox<()>| {
             let (mut read, message_handle) = args;
             loop {
                 let mut length_buffer = [0u8; 4];
@@ -536,7 +528,7 @@ impl Client {
                 MessageSignal::Signal(ProcessDiedSignal(_)) => {
                     break;
                 }
-                _ => { }
+                _ => {}
             }
         }
     }

@@ -1,8 +1,8 @@
-use std::{ops, time::Duration};
+use std::ops;
 
 use lunatic::{
     serializer::{Bincode, CanSerialize},
-    MailboxResult, Process, Tag,
+    Process, Tag,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
