@@ -23,12 +23,11 @@ RUN apt-get update \
 
 RUN mkdir -p /app
 
-COPY --from=builder /app/worker/target/wasm32-wasi/release/worker.wasm /app/worker.wasm
+COPY --from=builder /app/target/wasm32-wasi/release/worker.wasm /app/worker.wasm
 COPY --from=builder /app/lunatic /app/lunatic
 
 WORKDIR /app
 
 ENV WORKER_NAME=$HOST
 
-ENTRYPOINT ["sh", "-c", "/app/lunatic worker.wasm"]
-CMD ["127.0.0.1:8181", "$WORKER_NAME"]
+ENTRYPOINT ["/app/lunatic", "worker.wasm"]

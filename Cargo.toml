@@ -6,4 +6,5 @@ members = [
     "cli",
     "utils",
     "service",
+    "worker",
 ]
