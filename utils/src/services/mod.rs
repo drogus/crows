@@ -26,11 +26,18 @@ pub trait WorkerToCoordinator {
     async fn ping(&mut self) -> String;
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum WorkerStatus {
+    Available,
+    Busy
+}
+
 #[service(variant = "server", other_side = Client)]
 pub trait Coordinator {
     async fn upload_scenario(name: String, content: Vec<u8>) -> Result<(), CoordinatorError>;
-    async fn start(name: String, concurrency: usize);
+    async fn start(name: String, concurrency: usize, workers_number: usize);
     async fn list_workers() -> Vec<String>;
+    async fn update_status(&self, status: WorkerStatus, id: Uuid);
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

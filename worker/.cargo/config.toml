@@ -1,6 +1,2 @@
 [build]
-target = "wasm32-wasi"
 toolchain = "nightly"
-
-[target.wasm32-wasi]
-runner = "lunatic"

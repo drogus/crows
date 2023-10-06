@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 use tokio::time::sleep;
 use utils::services::{
     create_coordinator_server, create_worker_to_coordinator_server, CoordinatorError, WorkerClient,
+    WorkerStatus,
 };
 use utils::services::{Coordinator, WorkerToCoordinator};
 use uuid::Uuid;
@@ -27,6 +28,7 @@ struct WorkerToCoordinatorService {
 struct WorkerEntry {
     client: Arc<Mutex<Option<WorkerClient>>>,
     hostname: String,
+    status: WorkerStatus,
 }
 
 impl WorkerToCoordinator for WorkerToCoordinatorService {
@@ -42,6 +44,13 @@ struct CoordinatorService {
 }
 
 impl Coordinator for CoordinatorService {
+    async fn update_status(&self, status: WorkerStatus, id: Uuid) {
+        todo!()
+        // let workers = self.workers.lock().await;
+        // let mut worker = workers.get(&id).unwrap();
+        // worker.status = status;
+    }
+
     async fn upload_scenario(
         &self,
         name: String,
@@ -64,8 +73,9 @@ impl Coordinator for CoordinatorService {
         Ok(())
     }
 
-    async fn start(&self, name: String, concurrency: usize) {
-        for (_, worker_entry) in self.workers.lock().await.iter() {
+    async fn start(&self, name: String, concurrency: usize, workers_number: usize) {
+        // TODO: we should check if we have enough workers
+        for (_, worker_entry) in self.workers.lock().await.iter().take(workers_number) {
             if let Some(client) = worker_entry.client.lock().await.as_mut() {
                 client.start(name.clone(), concurrency).await;
             }
@@ -143,6 +153,7 @@ pub async fn main() {
                         locked.entry(data.id).or_insert(WorkerEntry {
                             client: wrapped_client.clone(),
                             hostname: data.hostname,
+                            status: WorkerStatus::Busy
                         });
                         drop(locked);
                     }

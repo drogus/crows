@@ -36,6 +36,8 @@ enum Commands {
         name: String,
         #[arg(short, long)]
         concurrency: usize,
+        #[arg(short, long)]
+        workers_number: usize,
     },
     Workers {
         #[command(subcommand)]
@@ -66,9 +68,9 @@ pub async fn main() {
                 .unwrap()
                 .unwrap();
         }
-        Some(Commands::Start { name, concurrency }) => {
+        Some(Commands::Start {name,concurrency, workers_number }) => {
             coordinator
-                .start(name.to_string(), concurrency.clone())
+                .start(name.to_string(), concurrency.clone(), workers_number.clone())
                 .await
                 .unwrap();
         }
