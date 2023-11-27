@@ -1,0 +1,13 @@
+[package]
+name = "crows-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.20", features = ["full"] }
+wasmtime = "14"
+anyhow = "1"
+wasmtime-wasi = { version = "14", features = ["tokio"] }
+wasi-common = "14"
+wiggle = "14"
+thiserror = "1"
