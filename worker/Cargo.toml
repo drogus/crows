@@ -6,17 +6,18 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde = "1"
-uuid = { version = "1.4.1", features = ["serde", "v4"] }
-serde_json = "1"
-thiserror = "1"
 crows-utils = { path = "../utils" }
-anyhow = "1"
 byteorder = "1.4"
 crows-service = { path = "../service" }
-tokio = { version = "1.20", features = ["full"] }
-tokio-serde = { version = "0.8.0", features = ["json"] }
-tokio-util = { version = "0.7.3", features = ["full"] }
-futures = "0.3.21"
-wasmtime = "13"
 crows-wasm = { path = "../wasm" }
+
+uuid.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+tokio-serde.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+wasmtime.workspace = true
