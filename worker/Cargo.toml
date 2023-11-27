@@ -1,5 +1,5 @@
 [package]
-name = "worker"
+name = "crows-worker"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,11 +10,13 @@ serde = "1"
 uuid = { version = "1.4.1", features = ["serde", "v4"] }
 serde_json = "1"
 thiserror = "1"
-utils = { path = "../utils" }
+crows-utils = { path = "../utils" }
 anyhow = "1"
 byteorder = "1.4"
-service = { path = "../service" }
+crows-service = { path = "../service" }
 tokio = { version = "1.20", features = ["full"] }
 tokio-serde = { version = "0.8.0", features = ["json"] }
 tokio-util = { version = "0.7.3", features = ["full"] }
 futures = "0.3.21"
+wasmtime = "13"
+crows-wasm = { path = "../wasm" }

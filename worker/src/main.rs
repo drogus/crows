@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use uuid::Uuid;
 
-use utils::services::{connect_to_worker_to_coordinator, Worker, WorkerData, WorkerError};
+use crows_utils::services::{connect_to_worker_to_coordinator, Worker, WorkerData, WorkerError};
 
 #[derive(Serialize, Deserialize, Clone)]
 struct WorkerService {

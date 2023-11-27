@@ -8,11 +8,11 @@ use std::time::Duration;
 use futures::future::join_all;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
-use utils::services::{
+use crows_utils::services::{
     create_coordinator_server, create_worker_to_coordinator_server, CoordinatorError, WorkerClient,
     WorkerStatus,
 };
-use utils::services::{Coordinator, WorkerToCoordinator};
+use crows_utils::services::{Coordinator, WorkerToCoordinator};
 use uuid::Uuid;
 
 // TODO: I don't like the fact that we have to wrap the client in Mutex and option. It should

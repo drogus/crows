@@ -1,5 +1,5 @@
 [package]
-name = "utils"
+name = "crows-utils"
 version = "0.1.0"
 edition = "2021"
 
@@ -13,7 +13,7 @@ tokio-serde = { version = "0.8.0", features = ["json"] }
 tokio-util = { version = "0.7.3", features = ["full"] }
 futures = { version = "0.3.21" }
 uuid = { version = "1.4.1", features = ["serde", "v4"] }
-service = { path = "../service" }
+crows-service = { path = "../service" }
 syn = { version = "2.0.37", features = ["full", "extra-traits", "fold"] }
 thiserror = "1.0.48"
 

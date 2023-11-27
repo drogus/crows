@@ -4,8 +4,8 @@
 use std::time::Duration;
 
 use tokio::time::sleep;
-use utils::services::connect_to_coordinator;
-use utils::services::{Client, Coordinator};
+use crows_utils::services::connect_to_coordinator;
+use crows_utils::services::{Client, Coordinator};
 
 use std::path::PathBuf;
 

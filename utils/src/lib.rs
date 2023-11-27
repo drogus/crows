@@ -26,7 +26,7 @@ use futures::TryStreamExt;
 pub use serde;
 pub use tokio;
 pub mod services;
-pub use service;
+pub use crows_service;
 
 pub struct Server {
     listener: TcpListener,

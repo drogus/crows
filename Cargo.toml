@@ -7,4 +7,5 @@ members = [
     "utils",
     "service",
     "worker",
+    "wasm",
 ]

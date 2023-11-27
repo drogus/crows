@@ -1,6 +1,6 @@
 use crate as utils;
 use serde::{Deserialize, Serialize};
-use service::service;
+use crows_service::service;
 use thiserror::Error;
 use uuid::Uuid;
 
