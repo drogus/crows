@@ -13,14 +13,16 @@ use crows_utils::services::{
     WorkerStatus,
 };
 use crows_utils::services::{Coordinator, WorkerToCoordinator};
+use crows_utils::ModuleId;
 use uuid::Uuid;
 
 // TODO: I don't like the fact that we have to wrap the client in Mutex and option. It should
 // be easier to match the client object with the request to the service. I should probably
 // add a context object at some point.
+// TODO: Client should probably be thread safe for easier handling
 #[derive(Default)]
 struct WorkerToCoordinatorService {
-    scenarios: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    scenarios: Arc<Mutex<HashMap<ModuleId, Vec<u8>>>>,
     workers: Arc<Mutex<HashMap<Uuid, WorkerEntry>>>,
     client: Arc<Mutex<Option<WorkerClient>>>,
 }
@@ -39,7 +41,7 @@ impl WorkerToCoordinator for WorkerToCoordinatorService {
 
 #[derive(Clone, Default)]
 struct CoordinatorService {
-    scenarios: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    scenarios: Arc<Mutex<HashMap<ModuleId, Vec<u8>>>>,
     workers: Arc<Mutex<HashMap<Uuid, WorkerEntry>>>,
 }
 
@@ -56,19 +58,24 @@ impl Coordinator for CoordinatorService {
         name: String,
         content: Vec<u8>,
     ) -> Result<(), CoordinatorError> {
+        let id = ModuleId::new(name.clone(), &content);
+
+        // TODO: to send bandwidth maybe it will be worth it to gzip the data? we would be gzipping
+        //       once and sending to N clients
         // send each uploaded scenario to all of the workers
         for (_, worker_entry) in self.workers.lock().await.iter() {
             let locked = worker_entry.client.lock();
             let mut futures = Vec::new();
             futures.push(async {
                 if let Some(client) = locked.await.as_mut() {
-                    client.upload_scenario(name.clone(), content.clone()).await;
+                    // TODO: handle Result
+                    client.upload_scenario(id.clone(), content.clone()).await;
                 }
             });
 
             join_all(futures).await;
         }
-        self.scenarios.lock().await.insert(name, content);
+        self.scenarios.lock().await.insert(id, content);
 
         Ok(())
     }
@@ -103,7 +110,7 @@ pub async fn main() {
         .parse()
         .unwrap();
 
-    let original_scenarios: Arc<Mutex<HashMap<String, Vec<u8>>>> = Default::default();
+    let original_scenarios: Arc<Mutex<HashMap<ModuleId, Vec<u8>>>> = Default::default();
     let original_workers: Arc<Mutex<HashMap<Uuid, WorkerEntry>>> = Default::default();
 
     let scenarios = original_scenarios.clone();
@@ -130,8 +137,8 @@ pub async fn main() {
 
                     // sent all the current scenarios to a new worker node
                     let locked = scenarios.lock().await;
-                    for (name, content) in locked.iter() {
-                        let _ = client.upload_scenario(name.clone(), content.clone()).await;
+                    for (id, content) in locked.iter() {
+                        let _ = client.upload_scenario(id.clone(), content.clone()).await;
                     }
                     drop(locked);
 

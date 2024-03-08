@@ -10,6 +10,7 @@ crows-utils = { path = "../utils" }
 byteorder = "1.4"
 crows-service = { path = "../service" }
 crows-wasm = { path = "../wasm" }
+num_cpus = "1.16"
 
 uuid.workspace = true
 serde.workspace = true
@@ -21,3 +22,4 @@ tokio-serde.workspace = true
 tokio-util.workspace = true
 futures.workspace = true
 wasmtime.workspace = true
+num-rational.workspace = true

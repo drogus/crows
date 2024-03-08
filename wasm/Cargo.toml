@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+crows-utils = { path = "../utils" }
+slab = "0.4"
+crows-bindings = { path = "../bindings" }
+
+borsh.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true

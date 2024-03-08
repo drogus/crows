@@ -28,6 +28,26 @@ pub use tokio;
 pub mod services;
 pub use crows_service;
 
+// ModuleId will be used to distinguish between different versions of modules
+// TODO: I don't have time to check the properties of the default Hash implementation
+//       it should be checked at some point. It's probably good enough, but I would like to confirm
+#[derive(Debug, Serialize, Deserialize, Clone, Hash, PartialEq, Eq)]
+pub struct ModuleId {
+    name: String,
+    version: String, // version will be a sha256 hash of the module contents
+}
+
+impl ModuleId {
+    pub fn new(name: String, content: &[u8]) -> Self {
+        let version = sha256::digest(content);
+
+        Self {
+            name,
+            version,
+        }
+    }
+}
+
 pub struct Server {
     listener: TcpListener,
 }

@@ -1,8 +1,9 @@
-use crate as utils;
+use crate::{self as utils, ModuleId};
 use serde::{Deserialize, Serialize};
 use crows_service::service;
 use thiserror::Error;
 use uuid::Uuid;
+use num_rational::Rational64;
 
 #[derive(Error, Debug, Serialize, Deserialize, Clone)]
 pub enum CoordinatorError {
@@ -16,6 +17,21 @@ pub enum WorkerError {
     UploadModuleError,
     #[error("could not find a requested scenario")]
     ScenarioNotFound,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct RunId(Uuid);
+
+impl RunId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Into<Uuid> for RunId {
+    fn into(self) -> Uuid {
+        self.0
+    }
 }
 
 // TODO: I don't like the fact that I need to specify the "other_side"
@@ -48,8 +64,9 @@ pub struct WorkerData {
 
 #[service(variant = "client", other_side = WorkerToCoordinator)]
 pub trait Worker {
-    async fn upload_scenario(&mut self, name: String, content: Vec<u8>);
+    async fn upload_scenario(&mut self, id: ModuleId, content: Vec<u8>);
     async fn ping(&self) -> String;
+    async fn prepare(&mut self, id: ModuleId, concurrency: usize, rate: Rational64) -> Result<RunId, WorkerError>;
     async fn start(&self, name: String, concurrency: usize) -> Result<(), WorkerError>;
     async fn get_data(&self) -> WorkerData;
 }

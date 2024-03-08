@@ -1,74 +1,78 @@
 #![feature(async_fn_in_trait)]
 #![feature(return_position_impl_trait_in_trait)]
 
-use std::{collections::HashMap, env::args_os, time::Duration};
+use crows_wasm::Runtime;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use std::{collections::HashMap, env::args_os, time::Duration};
+use tokio::sync::{RwLock, Mutex};
 use tokio::time::sleep;
 use uuid::Uuid;
 
-use crows_utils::services::{connect_to_worker_to_coordinator, Worker, WorkerData, WorkerError};
+use crows_utils::services::{connect_to_worker_to_coordinator, Worker, WorkerData, WorkerError, RunId};
+use crows_utils::ModuleId;
+use num_rational::Rational64;
 
-#[derive(Serialize, Deserialize, Clone)]
+type ScenariosList = Arc<RwLock<HashMap<ModuleId, Vec<u8>>>>;
+
+// TODO: in the future we should probably share it with the coordinator, ie.
+// coordinator should prepare the defaults based on the default module settings
+// by examining the module
+struct RunInfo {
+    run_id: RunId,
+    concurrency: usize,
+    rate: Rational64,
+    module_id: ModuleId,
+}
+
+impl RunInfo {
+    fn new(run_id: RunId, concurrency: usize, rate: Rational64, module_id: ModuleId) -> Self {
+        Self { run_id, concurrency, rate, module_id }
+    }
+}
+
+#[derive(Clone)]
 struct WorkerService {
-    scenarios: HashMap<String, Vec<u8>>,
+    scenarios: ScenariosList,
     hostname: String,
+    wasm_handles: Arc<Mutex<Vec<RuntimeHandle>>>,
+    runs: HashMap<RunId, RunInfo>
 }
 
 impl Worker for WorkerService {
-    async fn upload_scenario(&mut self, name: String, content: Vec<u8>) {
-        todo!()
-        // self.scenarios.insert(name, content);
+    async fn upload_scenario(&mut self, id: ModuleId, content: Vec<u8>) {
+        self.scenarios.write().await.insert(id, content);
     }
 
     async fn ping(&self) -> String {
         todo!()
     }
 
-    async fn start(&self, name: String, concurrency: usize) -> Result<(), WorkerError> {
-        todo!()
-        // let scenario = self
-        //     .scenarios
-        //     .get(&name)
-        //     .ok_or(WorkerError::ScenarioNotFound)?
-        //     .clone();
-        //
-        // let args = (scenario, name, concurrency);
-        // let _process = spawn!(|args, mailbox: Mailbox<()>| {
-        //     let (scenario, name, concurrency) = args;
-        //
-        //     println!("Running {name} scenario with {concurrency} concurrency.");
-        //
-        //     let module = WasmModule::new(&scenario).unwrap();
-        //     let monitorable = mailbox.monitorable();
-        //     let mut processes = Vec::new();
-        //     for _ in 0..concurrency {
-        //         match module.spawn::<(), Bincode>("_start", &[]) {
-        //             Ok(process) => {
-        //                 processes.push(process.id());
-        //                 monitorable.monitor(process);
-        //             }
-        //             Err(e) => {
-        //                 println!("Could not start process {name}: {e:?}");
-        //             }
-        //         }
-        //     }
-        //
-        //     loop {
-        //         match monitorable.receive() {
-        //             MessageSignal::Signal(ProcessDiedSignal(id)) => {
-        //                 if let Some(index) = processes.iter().position(|x| *x == id) {
-        //                     processes.remove(index);
-        //                     if processes.is_empty() {
-        //                         break;
-        //                     }
-        //                 }
-        //             }
-        //             MessageSignal::Message(_) => {}
-        //         }
-        //     }
-        // });
-        //
-        // Ok(())
+    async fn prepare(&mut self, id: ModuleId, concurrency: usize, rate: Rational64) -> Result<RunId, WorkerError> {
+        let run_id: RunId = RunId::new();
+
+        // TODO: we should check if we have a given module available and if not ask coordinator
+        // to send it. For now let's assume we have the module id
+        let info = RunInfo::new(run_id.clone(), concurrency, rate, id);
+        self.runs.insert(run_id, info);
+
+        Ok(run_id)
+    }
+
+    async fn start(&self, run_id: RunId) -> Result<(), WorkerError> {
+        let locked = self
+            .scenarios
+            .read()
+            .await;
+        let scenario = locked
+            .get(&id)
+            .ok_or(WorkerError::ScenarioNotFound)?
+            .clone();
+        drop(locked);
+
+        // spawn modules 
+
+        Ok(())
     }
 
     async fn get_data(&self) -> WorkerData {
@@ -79,27 +83,81 @@ impl Worker for WorkerService {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    let coordinator_address: String = std::env::var("COORDINATOR_ADDRESS")
-        .unwrap();
-    let hostname: String = std::env::var("WORKER_NAME")
-        .unwrap();
+#[derive(Clone)]
+struct RuntimeHandle {
+    runtime: Arc<Mutex<Runtime>>,
+}
 
+impl RuntimeHandle {
+    pub fn new(runtime: Runtime) -> Self {
+        Self { runtime: Arc::new(Mutex::new(runtime)) }
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // TODO: allow to set the number of CPUs
+    let cpus = num_cpus::get();
+
+    let coordinator_address: String = std::env::var("COORDINATOR_ADDRESS").unwrap();
+    let hostname: String = std::env::var("WORKER_NAME").unwrap();
 
     println!("Starting with hostname: {hostname}");
-    let scenarios: HashMap<String, Vec<u8>> = Default::default();
+    let handles: Arc<Mutex<Vec<RuntimeHandle>>> = Default::default();
+    let scenarios: ScenariosList = Default::default();
     let service = WorkerService {
-        scenarios,
+        scenarios: scenarios.clone(),
         hostname,
+        wasm_handles: handles.clone(),
+        runs: Default::default()
     };
 
-            println!("Connecting to {coordinator_address}");
-            let mut client =
-                connect_to_worker_to_coordinator(coordinator_address, service).await.unwrap();
+    std::thread::scope(|s| {
+        let mut threads = Vec::new();
 
-            loop {
-                client.ping();
-                sleep(Duration::from_secs(1));
-            }
+        let thread = s.spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let runtime = RuntimeHandle::new(Runtime::new());
+
+            rt.spawn(async move {
+                println!("Connecting to {coordinator_address}");
+                let mut client = connect_to_worker_to_coordinator(coordinator_address, service)
+                    .await
+                    .unwrap();
+
+                loop {
+                    // TODO: pinging should also work as an indicator of connection being alive
+                    client.ping();
+                    sleep(Duration::from_secs(1));
+                }
+            });
+        });
+
+        threads.push(thread);
+
+        for _ in (0..cpus).into_iter() {
+            let scenarios = scenarios.clone();
+            let handles = handles.clone();
+            let thread = s.spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                let wasm_runtime = RuntimeHandle::new(Runtime::new());
+
+                rt.spawn(async move {
+                    handles.lock().await.push(wasm_runtime.clone());
+                });
+            });
+            threads.push(thread);
+        }
+
+        for thread in threads {
+            thread.join();
+        }
+    });
+
+    Ok(())
 }
