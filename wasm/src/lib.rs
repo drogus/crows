@@ -1,20 +1,35 @@
-use borsh::to_vec;
-use crows_bindings::{HTTPResponse, HTTPError};
-use crows_utils::{services::RunId, ModuleId};
-use std::mem::MaybeUninit;
-use std::{any::Any, collections::HashMap, io::IoSlice, sync::Arc};
-use tokio::time::{Duration, Instant};
+use anyhow::anyhow;
+use crows_bindings::{HTTPError, HTTPMethod, HTTPRequest, HTTPResponse};
+use crows_utils::{services::RunId};
+use reqwest::header::{HeaderName, HeaderValue};
+use reqwest::{Body, Request, Url};
+use std::str::FromStr;
+use std::{any::Any, collections::HashMap, io::IoSlice};
 use wasi_common::WasiFile;
 use wasi_common::{
     file::{FdFlags, FileType},
-    pipe::WritePipe,
-    Table,
 };
 use wasmtime::{
-    Caller, Config, Engine, Linker, Memory, MemoryType, Module, Store, StoreContextMut, Val,
-    ValType,
+    Caller, Config, Engine, Linker, Memory, MemoryType, Module, Store
 };
-use wasmtime_wasi::{StdoutStream, WasiCtxBuilder};
+use wasmtime_wasi::{StdoutStream};
+use borsh::{BorshSerialize, BorshDeserialize, from_slice, to_vec};
+
+#[macro_export]
+macro_rules! ok_or_return {
+    ($expr:expr, $store:expr, $err_handler:expr) => {
+        match $expr {
+            Ok(value) => value,
+            Err(err) => {
+                let err = $err_handler(err);
+                let encoded = to_vec(&err)?;
+                let length = encoded.len();
+                let index = $store.buffers.insert(encoded.into_boxed_slice());
+                return Ok(create_return_value(1, length as u32, index as u32));
+            }
+        }
+    };
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -63,6 +78,7 @@ struct WasiHostCtx {
     preview1_adapter: wasmtime_wasi::preview1::WasiPreview1Adapter,
     memory: Option<Memory>,
     buffers: slab::Slab<Box<[u8]>>,
+    client: reqwest::Client,
 }
 
 fn create_return_value(status: u8, length: u32, ptr: u32) -> u64 {
@@ -78,55 +94,118 @@ impl WasiHostCtx {
         self.memory = Some(mem);
     }
 
-    pub fn log(mut caller: Caller<'_, Self>, ptr: u32, len: u32) -> anyhow::Result<()> {
-        let memory = get_memory(&mut caller)?;
+    pub async fn http(mut caller: Caller<'_, Self>, ptr: u32, len: u32) -> anyhow::Result<u64> {
+        let request: HTTPRequest = Self::fetch_arg(&mut caller, ptr, len)?;
 
-        let row_str = memory
-            .data(&caller)
-            .get(ptr as usize..(ptr + len) as usize)
-            .unwrap();
-
-        Ok(())
-    }
-
-    pub fn http(mut caller: Caller<'_, Self>, ptr: u32, len: u32) -> u64 {
         let memory = get_memory(&mut caller).unwrap();
-
-        let str = memory
-            .data(&caller)
-            .get(ptr as usize..(ptr + len) as usize)
-            .unwrap();
-
-        let response = HTTPResponse {
-            headers: HashMap::new(),
-            body: "foo bar".into(),
-            status: 200,
-        };
-        let err = HTTPError {
-
-        };
-        let encoded = to_vec(&err).unwrap();
-
-        let length = encoded.len();
-        println!("return len: {length}, {:?}", encoded.to_vec());
         let (_, store) = memory.data_and_store_mut(&mut caller);
-        let index = store.buffers.insert(encoded.into_boxed_slice());
 
-        println!("returning 0, {length}, {index}");
-        create_return_value(1, length as u32, index as u32)
+        let client = &store.client;
+
+        let method = match request.method {
+            HTTPMethod::HEAD => reqwest::Method::HEAD,
+            HTTPMethod::GET => reqwest::Method::GET,
+            HTTPMethod::POST => reqwest::Method::POST,
+            HTTPMethod::PUT => reqwest::Method::PUT,
+            HTTPMethod::DELETE => reqwest::Method::DELETE,
+            HTTPMethod::OPTIONS => reqwest::Method::OPTIONS,
+        };
+        let url = ok_or_return!(Url::parse(&request.url), store, |err| HTTPError {
+            message: format!("Error when parsing the URL: {err:?}"),
+        });
+
+        let mut reqw_req = Request::new(method, url);
+
+        for (key, value) in request.headers {
+            let name = ok_or_return!(HeaderName::from_str(&key), store, |err| HTTPError {
+                message: format!("Invalid header name: {key}: {err:?}"),
+            });
+            let value = ok_or_return!(HeaderValue::from_str(&value), store, |err| HTTPError {
+                message: format!("Invalid header value: {value}: {err:?}"),
+            });
+            reqw_req.headers_mut().insert(name, value);
+        }
+
+        *reqw_req.body_mut() = request.body.map(|b| Body::from(b));
+
+        let response = ok_or_return!(client.execute(reqw_req).await, store, |err| HTTPError {
+            message: format!("Error when sending a request: {err:?}"),
+        });
+
+        let mut headers = HashMap::new();
+        for (name, value) in response.headers().iter() {
+            let value = ok_or_return!(value.to_str(), store, |err| HTTPError {
+                message: format!("Could not parse response header {value:?}: {err:?}"),
+            });
+            headers.insert(name.to_string(), value.to_string());
+        }
+
+        let status = response.status().as_u16();
+        let body = ok_or_return!(response.text().await, store, |err| HTTPError {
+            message: format!("Problem with fetching the body: {err:?}"),
+        });
+
+        Self::return_result(
+            &mut caller,
+            HTTPResponse {
+                headers,
+                body,
+                status,
+            },
+        )
     }
 
-    pub fn consume_buffer(mut caller: Caller<'_, Self>, index: u32, ptr: u32, len: u32) -> anyhow::Result<()> {
-        let memory = get_memory(&mut caller).unwrap();
+    pub fn consume_buffer(
+        mut caller: Caller<'_, Self>,
+        index: u32,
+        ptr: u32,
+        len: u32,
+    ) -> anyhow::Result<()> {
+        let memory = get_memory(&mut caller)?;
         let (mut slice, store) = memory.data_and_store_mut(&mut caller);
+
         let buffer = store.buffers.try_remove(index as usize).unwrap();
         anyhow::ensure!(
             len as usize == buffer.len(),
             "bad length passed to consume_buffer"
         );
-        slice.get_mut((ptr as usize)..((ptr+len) as usize)).unwrap().copy_from_slice(&buffer);
+        slice
+            .get_mut((ptr as usize)..((ptr + len) as usize))
+            .unwrap()
+            .copy_from_slice(&buffer);
 
         Ok(())
+    }
+
+    pub fn fetch_arg<T>(mut caller: &mut Caller<'_, Self>, ptr: u32, len: u32) -> anyhow::Result<T>
+    where
+        T: BorshDeserialize,
+    {
+        let memory = get_memory(&mut caller)?;
+
+        let slice = memory
+            .data(&caller)
+            .get(ptr as usize..(ptr + len) as usize)
+            .ok_or(anyhow!("Could not get memory slice"))?;
+
+        let arg = from_slice(slice)?;
+
+        return Ok(arg);
+    }
+
+    pub fn return_result<T>(mut caller: &mut Caller<'_, Self>, ret: T) -> anyhow::Result<u64>
+    where
+        T: BorshSerialize,
+    {
+        let memory = get_memory(&mut caller)?;
+        let (_, store) = memory.data_and_store_mut(&mut caller);
+
+        let encoded = to_vec(&ret)?;
+
+        let length = encoded.len();
+        let index = store.buffers.insert(encoded.into_boxed_slice());
+
+        Ok(create_return_value(0, length as u32, index as u32))
     }
 }
 
@@ -173,10 +252,16 @@ impl Instance {
 
         let mut linker = Linker::new(&engine);
 
-        linker.func_wrap("crows", "log", WasiHostCtx::log).unwrap();
-        linker.func_wrap("crows", "consume_buffer", WasiHostCtx::consume_buffer).unwrap();
+        // linker.func_wrap("crows", "log", WasiHostCtx::log).unwrap();
         linker
-            .func_wrap("crows", "http", WasiHostCtx::http)
+            .func_wrap("crows", "consume_buffer", WasiHostCtx::consume_buffer)
+            .unwrap();
+        linker
+            .func_wrap2_async("crows", "http", |caller, ptr, len| {
+                Box::new(async move {
+                    WasiHostCtx::http(caller, ptr, len).await
+                })
+            })
             .unwrap();
         // let _ = linker.func_new_async(
         //     "crows",
@@ -235,6 +320,7 @@ pub async fn run_wasm(instance: &Instance) -> anyhow::Result<()> {
         preview1_adapter: wasmtime_wasi::preview1::WasiPreview1Adapter::new(),
         buffers: slab::Slab::default(),
         memory: None,
+        client: reqwest::Client::new(),
     };
     let mut store: Store<WasiHostCtx> = Store::new(&instance.engine, host_ctx);
 

@@ -7,8 +7,9 @@ edition = "2021"
 crows-utils = { path = "../utils" }
 slab = "0.4"
 crows-bindings = { path = "../bindings" }
+async-trait = "0.1"
+reqwest = "0.11"
 
-borsh.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
@@ -16,3 +17,4 @@ wasmtime.workspace = true
 wasmtime-wasi.workspace = true
 wasi-common.workspace = true
 wiggle.workspace = true
+borsh.workspace = true

@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use crows_wasm::{run_wasm, Instance};
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), anyhow::Error> {
     let path = std::env::var("MODULE_PATH").expect("MODULE_PATH env var is not set");
     let content = std::fs::read(path).unwrap();

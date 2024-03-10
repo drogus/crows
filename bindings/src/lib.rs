@@ -1,5 +1,5 @@
-use borsh::{from_slice, to_vec, BorshDeserialize, BorshSchema, BorshSerialize};
 use std::{cell::RefCell, collections::HashMap, mem::MaybeUninit};
+use borsh::{BorshSerialize, BorshDeserialize, from_slice, to_vec};
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub enum HTTPMethod {
@@ -13,14 +13,17 @@ pub enum HTTPMethod {
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub struct HTTPRequest {
-    url: String,
-    method: HTTPMethod,
-    headers: HashMap<String, String>,
-    body: Option<String>,
+    // TODO: these should not be public I think, I'd prefer to do a public interface for them
+    pub url: String,
+    pub method: HTTPMethod,
+    pub headers: HashMap<String, String>,
+    pub body: Option<String>,
 }
 
 #[derive(Debug, BorshDeserialize, BorshSerialize)]
-pub struct HTTPError {}
+pub struct HTTPError {
+    pub message: String
+}
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub struct HTTPResponse {
@@ -49,7 +52,7 @@ mod bindings {
 
 fn with_buffer<R>(f: impl FnOnce(&mut Vec<u8>) -> R) -> R {
     thread_local! {
-        static BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+        static BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(1024));
     }
 
     BUFFER.with(|r| {
@@ -86,7 +89,6 @@ where
 {
     let mut encoded = to_vec(arguments).unwrap();
 
-    println!("encoded length: {}", encoded.len());
     let (status, length, index) = with_buffer(|mut buf| {
         buf.append(&mut encoded);
         let response = f(&mut buf);
@@ -94,13 +96,10 @@ where
         extract_from_return_value(response)
     });
 
-    println!("response: {status}, {length}, {index}");
     with_buffer(|buf| {
-        let capacity = buf.capacity();
-        if capacity < length as usize {
-            let additional = length as usize - buf.capacity();
-            buf.reserve_exact(additional);
-        }
+        // when using reserve_exact it guarantees capacity to be vector.len() + additional long,
+        // thus we can just use length for reserving
+        buf.reserve_exact(length as usize);
 
         unsafe {
             bindings::consume_buffer(index, buf.as_mut_ptr(), length as usize);
