@@ -10,7 +10,7 @@
 
 use std::time::Instant;
 
-use crows_wasm::{run_wasm, Instance};
+use crows_wasm::{run_wasm, Instance, Runtime};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), anyhow::Error> {
@@ -25,12 +25,34 @@ async fn main() -> Result<(), anyhow::Error> {
 
     // let module = Module::from_binary(&engine, &content)?;
 
-    let env = Instance::new(content.clone())?;
+    let mut receivers = Vec::new();
+    let runtime = Runtime::new()?;
     let instant = Instant::now();
-    for _ in 0..1 {
-
-        run_wasm(&env).await?;
+    let mut futures = Vec::new();
+    for _ in 0..10 {
+        let (mut instance, receiver) = Instance::new(&content, &runtime.environment).await.unwrap();
+        receivers.push(receiver);
+        let fut = async move {
+            run_wasm(&mut instance).await.unwrap();
+        };
+        futures.push(fut);
     }
+
+    tokio::spawn(async move {
+        let mut futures = Vec::new();
+        for mut receiver in receivers {
+            let fut = async move {
+                while let Some(message) = receiver.recv().await {
+                    println!("stdout: {}", String::from_utf8(message).unwrap());
+                }
+            };
+            futures.push(fut);
+        }
+
+        futures::future::join_all(futures).await;
+    });
+
+    futures::future::join_all(futures).await;
 
     println!("elapsed: {}ms", instant.elapsed().as_millis());
 
@@ -143,6 +165,3 @@ async fn main() -> Result<(), anyhow::Error> {
 //
 //     Ok(())
 // }
-
-
-

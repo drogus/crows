@@ -27,3 +27,4 @@ wasi-common = { git = "https://github.com/bytecodealliance/wasmtime.git" }
 wiggle = { git = "https://github.com/bytecodealliance/wasmtime.git" }
 num-rational = { version = "0.4", features = ["serde"]}
 borsh = { version = "1.3", features = ["unstable__schema", "derive"] }
+bytes = "1.5"

@@ -18,3 +18,5 @@ wasmtime-wasi.workspace = true
 wasi-common.workspace = true
 wiggle.workspace = true
 borsh.workspace = true
+futures.workspace = true
+bytes.workspace = true
