@@ -10,3 +10,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 crows-bindings = { path = "../bindings" }
+
+[profile.release]
+lto = true

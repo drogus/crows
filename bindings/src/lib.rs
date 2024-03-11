@@ -46,7 +46,6 @@ mod bindings {
         pub fn log(content: *mut u8, content_len: usize);
         pub fn http(content: *mut u8, content_len: usize) -> u64;
         pub fn consume_buffer(index: u32, content: *mut u8, content_len: usize);
-
     }
 }
 
