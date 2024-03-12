@@ -1,5 +1,5 @@
+use borsh::{from_slice, to_vec, BorshDeserialize, BorshSerialize};
 use std::{cell::RefCell, collections::HashMap, mem::MaybeUninit};
-use borsh::{BorshSerialize, BorshDeserialize, from_slice, to_vec};
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub enum HTTPMethod {
@@ -22,7 +22,7 @@ pub struct HTTPRequest {
 
 #[derive(Debug, BorshDeserialize, BorshSerialize)]
 pub struct HTTPError {
-    pub message: String
+    pub message: String,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
@@ -50,15 +50,10 @@ mod bindings {
 }
 
 fn with_buffer<R>(f: impl FnOnce(&mut Vec<u8>) -> R) -> R {
-    thread_local! {
-        static BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(1024));
-    }
+    let mut buffer: Vec<u8> = Vec::with_capacity(256);
 
-    BUFFER.with(|r| {
-        let mut buf = r.borrow_mut();
-        buf.clear();
-        f(&mut buf)
-    })
+    buffer.clear();
+    f(&mut buffer)
 }
 
 pub fn http_request(
@@ -88,27 +83,25 @@ where
 {
     let mut encoded = to_vec(arguments).unwrap();
 
-    let (status, length, index) = with_buffer(|mut buf| {
-        buf.append(&mut encoded);
-        let response = f(&mut buf);
+    let response = f(&mut encoded);
 
-        extract_from_return_value(response)
-    });
+    let (status, length, index) = extract_from_return_value(response);
 
-    with_buffer(|buf| {
-        // when using reserve_exact it guarantees capacity to be vector.len() + additional long,
-        // thus we can just use length for reserving
-        buf.reserve_exact(length as usize);
+    let mut buf = encoded;
+    buf.clear();
 
-        unsafe {
-            bindings::consume_buffer(index, buf.as_mut_ptr(), length as usize);
-            buf.set_len(length as usize);
-        }
+    // when using reserve_exact it guarantees capacity to be vector.len() + additional long,
+    // thus we can just use length for reserving
+    buf.reserve_exact(length as usize);
 
-        if status == 0 {
-            Ok(from_slice(buf).expect("Couldn't decode message from the host"))
-        } else {
-            Err(from_slice(buf).expect("Couldn't decode message from the host"))
-        }
-    })
+    unsafe {
+        bindings::consume_buffer(index, buf.as_mut_ptr(), length as usize);
+        buf.set_len(length as usize);
+    }
+
+    if status == 0 {
+        Ok(from_slice(&buf).expect("Couldn't decode message from the host"))
+    } else {
+        Err(from_slice(&buf).expect("Couldn't decode message from the host"))
+    }
 }
