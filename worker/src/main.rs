@@ -18,6 +18,7 @@ type ScenariosList = Arc<RwLock<HashMap<ModuleId, Vec<u8>>>>;
 // TODO: in the future we should probably share it with the coordinator, ie.
 // coordinator should prepare the defaults based on the default module settings
 // by examining the module
+#[derive(Clone)]
 struct RunInfo {
     run_id: RunId,
     concurrency: usize,
@@ -32,14 +33,14 @@ impl RunInfo {
 }
 
 #[derive(Clone)]
-struct WorkerService {
+struct WorkerService<'a> {
     scenarios: ScenariosList,
     hostname: String,
-    wasm_handles: Arc<Mutex<Vec<RuntimeHandle>>>,
+    wasm_handles: Arc<Mutex<Vec<RuntimeHandle<'a>>>>,
     runs: HashMap<RunId, RunInfo>
 }
 
-impl Worker for WorkerService {
+impl<'a> Worker for WorkerService<'a> {
     async fn upload_scenario(&mut self, id: ModuleId, content: Vec<u8>) {
         self.scenarios.write().await.insert(id, content);
     }
@@ -54,12 +55,12 @@ impl Worker for WorkerService {
         // TODO: we should check if we have a given module available and if not ask coordinator
         // to send it. For now let's assume we have the module id
         let info = RunInfo::new(run_id.clone(), concurrency, rate, id);
-        self.runs.insert(run_id, info);
+        self.runs.insert(run_id.clone(), info);
 
         Ok(run_id)
     }
 
-    async fn start(&self, run_id: RunId) -> Result<(), WorkerError> {
+    async fn start(&self, id: ModuleId, concurrency: usize) -> Result<(), WorkerError> {
         let locked = self
             .scenarios
             .read()
@@ -84,12 +85,12 @@ impl Worker for WorkerService {
 }
 
 #[derive(Clone)]
-struct RuntimeHandle {
-    runtime: Arc<Mutex<Runtime>>,
+struct RuntimeHandle<'a> {
+    runtime: Arc<Mutex<Runtime<'a>>>,
 }
 
-impl RuntimeHandle {
-    pub fn new(runtime: Runtime) -> Self {
+impl<'a> RuntimeHandle<'a> {
+    pub fn new(runtime: Runtime<'a>) -> Self {
         Self { runtime: Arc::new(Mutex::new(runtime)) }
     }
 }
@@ -119,7 +120,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .enable_all()
                 .build()
                 .unwrap();
-            let runtime = RuntimeHandle::new(Runtime::new());
 
             rt.spawn(async move {
                 println!("Connecting to {coordinator_address}");
@@ -145,7 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .enable_all()
                     .build()
                     .unwrap();
-                let wasm_runtime = RuntimeHandle::new(Runtime::new());
+                let wasm_runtime = RuntimeHandle::new(Runtime::new().expect("Couldn't create a Runtime"));
 
                 rt.spawn(async move {
                     handles.lock().await.push(wasm_runtime.clone());

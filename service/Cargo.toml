@@ -16,4 +16,3 @@ proc-macro = true
 
 [features]
 async = []
-lunatic = []

@@ -9,9 +9,6 @@ COPY . .
 
 RUN cd worker && cargo build --release
 
-RUN cargo install lunatic-runtime
-RUN cp `which lunatic` /app/lunatic
-
 FROM debian:buster
 
 RUN apt-get update \
@@ -23,11 +20,10 @@ RUN apt-get update \
 
 RUN mkdir -p /app
 
-COPY --from=builder /app/target/wasm32-wasi/release/worker.wasm /app/worker.wasm
-COPY --from=builder /app/lunatic /app/lunatic
+COPY --from=builder /app/target/release/worker /app/worker
 
 WORKDIR /app
 
 ENV WORKER_NAME=$HOST
 
-ENTRYPOINT ["/app/lunatic", "worker.wasm"]
+ENTRYPOINT ["/app/worker"]

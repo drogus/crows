@@ -62,11 +62,7 @@ This should execute test instances on each of the workers
 
 #### Running locally
 
-Running locally is possible if you have Rust installed. On top of that you need the `lunatic-runtime`:
-
-```
-cargo install lunatic-runtime
-```
+Running locally is possible if you have Rust installed.
 
 Then you can run using cargo, for example:
 

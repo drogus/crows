@@ -67,7 +67,7 @@ pub trait Worker {
     async fn upload_scenario(&mut self, id: ModuleId, content: Vec<u8>);
     async fn ping(&self) -> String;
     async fn prepare(&mut self, id: ModuleId, concurrency: usize, rate: Rational64) -> Result<RunId, WorkerError>;
-    async fn start(&self, name: String, concurrency: usize) -> Result<(), WorkerError>;
+    async fn start(&self, id: ModuleId, concurrency: usize) -> Result<(), WorkerError>;
     async fn get_data(&self) -> WorkerData;
 }
 
