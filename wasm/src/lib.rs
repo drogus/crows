@@ -1,17 +1,22 @@
 use anyhow::anyhow;
-use borsh::{from_slice, to_vec, BorshDeserialize, BorshSerialize};
 use crows_bindings::{HTTPError, HTTPMethod, HTTPRequest, HTTPResponse};
 use crows_utils::services::RunId;
 use futures::Future;
 use reqwest::header::{HeaderName, HeaderValue};
 use reqwest::{Body, Request, Url};
+use serde::Serialize;
+use serde_json::{from_slice, to_vec};
+use std::collections::VecDeque;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
 use std::{any::Any, collections::HashMap, io::IoSlice};
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::Mutex;
 use wasi_common::file::{FdFlags, FileType};
 use wasi_common::WasiFile;
-use wasmtime::{Caller, Config, Engine, Linker, Memory, MemoryType, Module, Store};
+use wasmtime::{Caller, Engine, Linker, Memory, MemoryType, Module, Store};
 use wasmtime_wasi::{StdoutStream, StreamResult};
 
 #[derive(thiserror::Error, Debug)]
@@ -20,8 +25,6 @@ pub enum Error {
     NoSuchRun(RunId),
 }
 
-// A runtime should be run in a single async runtime. Ideally also in a single
-// thread as we want a share-nothing architecture for performance and simplicity
 pub struct Runtime<'a> {
     // we index instances with the run id, cause technically we can run
     // scenarios from multiple modules on a single runtime
@@ -29,16 +32,20 @@ pub struct Runtime<'a> {
     // it. If the overhead is too big I'd probably refactor it to allow only one module
     // at any point in time. I would like to start with multiple modules, though, to first
     // see if it's actually problematic, maybe it's not and it seems to give more flexibility
-    pub instances: HashMap<RunId, Vec<Instance<'a>>>,
+    pub instances: VecDeque<Instance<'a>>,
     pub environment: Environment,
 }
 
 impl<'a> Runtime<'a> {
     pub fn new() -> anyhow::Result<Self> {
         Ok(Self {
-            instances: HashMap::new(),
+            instances: VecDeque::new(),
             environment: Environment::new()?,
         })
+    }
+
+    pub async fn compile_instance(&self, content: &Vec<u8>) -> anyhow::Result<(Instance<'_>, UnboundedReceiver<Vec<u8>>)> {
+        Instance::new(content, &self.environment).await
     }
     // TODO: it looks like the id/module pair should be in a separate data type, might
     //       be worth to extract it in the future
@@ -86,9 +93,12 @@ impl WasiHostCtx {
         f: F,
     ) -> anyhow::Result<u64>
     where
-        F: for<'b> FnOnce(&'b mut Caller<'_, Self>, HTTPRequest) -> Pin<Box<dyn Future<Output = Result<U, E>> + 'b + Send>>,
-        U: BorshSerialize,
-        E: BorshSerialize,
+        F: for<'b> FnOnce(
+            &'b mut Caller<'_, Self>,
+            HTTPRequest,
+        ) -> Pin<Box<dyn Future<Output = Result<U, E>> + 'b + Send>>,
+        U: Serialize,
+        E: Serialize,
     {
         let memory = get_memory(&mut caller)?;
 
@@ -184,6 +194,23 @@ impl WasiHostCtx {
         })
     }
 
+    pub fn set_config(mut caller: Caller<'_, Self>, ptr: u32, len: u32) -> anyhow::Result<u32> {
+        let memory = get_memory(&mut caller)?;
+
+        let slice = memory
+            .data(&caller)
+            .get(ptr as usize..(ptr + len) as usize)
+            .ok_or(anyhow!("Could not get memory slice"))?
+            .to_owned()
+            .into_boxed_slice();
+
+        let (_, store) = memory.data_and_store_mut(&mut caller);
+
+        let index = store.buffers.insert(slice);
+
+        Ok(index as u32)
+    }
+
     pub fn consume_buffer(
         mut caller: Caller<'_, Self>,
         index: u32,
@@ -227,6 +254,7 @@ impl wasmtime_wasi::preview1::WasiPreview1View for WasiHostCtx {
     }
 }
 
+#[derive(Clone)]
 pub struct Environment {
     engine: Engine,
     linker: Linker<WasiHostCtx>,
@@ -242,7 +270,7 @@ pub struct Instance<'a> {
 
 impl Environment {
     pub fn new() -> anyhow::Result<Self> {
-        let mut config = Config::new();
+        let mut config = wasmtime::Config::new();
         config.async_support(true);
         config.consume_fuel(true);
 
@@ -259,6 +287,9 @@ impl Environment {
                     WasiHostCtx::wrap_async(caller, ptr, len, WasiHostCtx::http).await
                 })
             })
+            .unwrap();
+        linker
+            .func_wrap("crows", "set_config", WasiHostCtx::set_config)
             .unwrap();
 
         wasmtime_wasi::preview1::add_to_linker_async(&mut linker)?;
@@ -305,13 +336,10 @@ impl<'a> Instance<'a> {
         Ok((store, receiver))
     }
 
-    pub async fn new(
-        raw_module: &Vec<u8>,
-        env: &'a Environment,
-    ) -> anyhow::Result<(Self, UnboundedReceiver<Vec<u8>>)> {
+    pub async fn new(raw_module: &Vec<u8>, env: &'a Environment) -> anyhow::Result<(Self, UnboundedReceiver<Vec<u8>>)> {
         let module = Module::from_binary(&env.engine, raw_module)?;
 
-        let (mut store, stdout_receiver) = Instance::new_store(&env.engine)?;
+        let (mut store, logs_receiver) = Instance::new_store(&env.engine)?;
         let instance = env.linker.instantiate_async(&mut store, &module).await?;
 
         // let func = instance
@@ -322,16 +350,14 @@ impl<'a> Instance<'a> {
 
         // drop(store);
 
-        Ok((
-            Self {
-                engine: &env.engine,
-                module,
-                linker: &env.linker,
-                store,
-                instance,
-            },
-            stdout_receiver,
-        ))
+        let result = Self {
+            engine: &env.engine,
+            module,
+            linker: &env.linker,
+            store,
+            instance,
+        };
+        Ok((result, logs_receiver))
     }
 }
 
@@ -343,6 +369,22 @@ pub async fn run_wasm(instance: &mut Instance<'_>) -> anyhow::Result<()> {
     func.call_async(&mut instance.store, ()).await?;
 
     Ok(())
+}
+
+pub async fn fetch_config(instance: &mut Instance<'_>) -> anyhow::Result<crows_shared::Config> {
+    let func = instance
+        .instance
+        .get_typed_func::<(), u32>(&mut instance.store, "__config")?;
+
+    let index = func.call_async(&mut instance.store, ()).await?;
+    let buffer = instance
+        .store
+        .data_mut()
+        .buffers
+        .try_remove(index as usize)
+        .ok_or(anyhow!("Couldn't find slab"))?;
+
+    Ok(from_slice(&buffer)?)
 }
 
 #[derive(Clone)]

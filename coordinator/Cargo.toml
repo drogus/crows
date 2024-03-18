@@ -6,9 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-crows-utils = { path = "../utils" }
-crows-service = { path = "../service" }
-
 tokio.workspace = true
 tokio-serde.workspace = true
 tokio-util.workspace = true
@@ -16,3 +13,7 @@ serde.workspace = true
 serde_json.workspace = true
 futures.workspace = true
 uuid.workspace = true
+crows-shared.workspace = true
+crows-wasm.workspace = true
+crows-utils.workspace = true
+crows-service.workspace = true

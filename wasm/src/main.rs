@@ -1,4 +1,4 @@
-// use std::{any::Any, io::IoSlice, sync::Arc};
+// use std::
 // use tokio::time::{Duration, Instant};
 // use wasi_common::{
 //     file::{FdFlags, FileType},
@@ -28,15 +28,20 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut receivers = Vec::new();
     let runtime = Runtime::new()?;
     let instant = Instant::now();
-    let mut futures = Vec::new();
-    for _ in 0..10 {
-        let (mut instance, receiver) = Instance::new(&content, &runtime.environment).await.unwrap();
-        receivers.push(receiver);
-        let fut = async move {
-            run_wasm(&mut instance).await.unwrap();
-        };
-        futures.push(fut);
-    }
+    // let mut futures = Vec::new();
+
+    let (mut instance, receiver) = Instance::new(&content, &runtime.environment).await.unwrap();
+    receivers.push(receiver);
+    let config = crows_wasm::fetch_config(&mut instance).await.unwrap();
+    println!("Config: {config:?}");
+    // for _ in 0..10 {
+    //     let (mut instance, receiver) = Instance::new(&content, &runtime.environment).await.unwrap();
+    //     receivers.push(receiver);
+    //     let fut = async move {
+    //         run_wasm(&mut instance).await.unwrap();
+    //     };
+    //     futures.push(fut);
+    // }
 
     tokio::spawn(async move {
         let mut futures = Vec::new();
@@ -52,9 +57,9 @@ async fn main() -> Result<(), anyhow::Error> {
         futures::future::join_all(futures).await;
     });
 
-    futures::future::join_all(futures).await;
+    // futures::future::join_all(futures).await;
 
-    println!("elapsed: {}ms", instant.elapsed().as_millis());
+    // println!("elapsed: {}ms", instant.elapsed().as_millis());
 
     Ok(())
 }

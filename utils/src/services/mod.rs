@@ -9,6 +9,14 @@ use num_rational::Rational64;
 pub enum CoordinatorError {
     #[error("could not upload a module")]
     UploadModuleError,
+    #[error("couldn't find module {0}")]
+    NoSuchModule(String),
+    #[error("Failed to create runtime: {0}")]
+    FailedToCreateRuntime(String),
+    #[error("Failed to compile module")]
+    FailedToCompileModule,
+    #[error("Couldn't fetch config: {0}")]
+    CouldNotFetchConfig(String)
 }
 
 #[derive(Error, Debug, Serialize, Deserialize, Clone)]
@@ -17,6 +25,8 @@ pub enum WorkerError {
     UploadModuleError,
     #[error("could not find a requested scenario")]
     ScenarioNotFound,
+    #[error("could not create a module from binary")]
+    CouldNotCreateModule,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -51,7 +61,7 @@ pub enum WorkerStatus {
 #[service(variant = "server", other_side = Client)]
 pub trait Coordinator {
     async fn upload_scenario(name: String, content: Vec<u8>) -> Result<(), CoordinatorError>;
-    async fn start(name: String, concurrency: usize, workers_number: usize);
+    async fn start(name: String, workers_number: usize) -> Result<(), CoordinatorError>;
     async fn list_workers() -> Vec<String>;
     async fn update_status(&self, status: WorkerStatus, id: Uuid);
 }
@@ -64,10 +74,10 @@ pub struct WorkerData {
 
 #[service(variant = "client", other_side = WorkerToCoordinator)]
 pub trait Worker {
-    async fn upload_scenario(&mut self, id: ModuleId, content: Vec<u8>);
+    async fn upload_scenario(&mut self, name: String, content: Vec<u8>);
     async fn ping(&self) -> String;
-    async fn prepare(&mut self, id: ModuleId, concurrency: usize, rate: Rational64) -> Result<RunId, WorkerError>;
-    async fn start(&self, id: ModuleId, concurrency: usize) -> Result<(), WorkerError>;
+    // async fn prepare(&mut self, id: ModuleId, concurrency: usize, rate: Rational64) -> Result<RunId, WorkerError>;
+    async fn start(&self, name: String, config: crows_shared::Config) -> Result<(), WorkerError>;
     async fn get_data(&self) -> WorkerData;
 }
 

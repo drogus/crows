@@ -1,8 +1,23 @@
+use crows_bindings::{
+    config, http_request, ConstantArrivalRateConfig, ExecutorConfig, HTTPMethod::*,
+};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use crows_bindings::{http_request, HTTPMethod::*};
+use std::time::Duration;
 
-#[export_name="test"]
+#[config]
+fn config() -> ExecutorConfig {
+    let config = ConstantArrivalRateConfig {
+        duration: Duration::from_secs(10),
+        rate: 50,
+        time_unit: Duration::from_secs(1),
+        allocated_vus: 50,
+        ..Default::default()
+    };
+    ExecutorConfig::ConstantArrivalRate(config)
+}
+
+#[export_name = "test"]
 pub fn test() {
     let response = http_request("https://example.com".into(), GET, HashMap::new(), "".into());
     println!("response: {:?}", response.unwrap().status);
