@@ -1,11 +1,5 @@
-#![feature(async_fn_in_trait)]
-#![feature(return_position_impl_trait_in_trait)]
-
-use std::time::Duration;
-
-use tokio::time::sleep;
 use crows_utils::services::connect_to_coordinator;
-use crows_utils::services::{Client, Coordinator};
+use crows_utils::services::Client;
 
 use std::path::PathBuf;
 
@@ -66,7 +60,10 @@ pub async fn main() {
                 .unwrap()
                 .unwrap();
         }
-        Some(Commands::Start {name, workers_number }) => {
+        Some(Commands::Start {
+            name,
+            workers_number,
+        }) => {
             coordinator
                 .start(name.to_string(), workers_number.clone())
                 .await

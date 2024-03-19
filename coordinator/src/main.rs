@@ -1,6 +1,3 @@
-#![feature(async_fn_in_trait)]
-#![feature(return_position_impl_trait_in_trait)]
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;

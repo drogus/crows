@@ -1,6 +1,3 @@
-#![feature(async_fn_in_trait)]
-#![feature(return_position_impl_trait_in_trait)]
-
 use convert_case::{Case, Casing};
 use proc_macro::TokenStream;
 use syn::parse::{Parse, ParseStream};
