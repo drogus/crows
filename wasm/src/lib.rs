@@ -7,6 +7,7 @@ use reqwest::{Body, Request, Url};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{from_slice, to_vec};
+use tokio::time::Instant;
 use std::collections::VecDeque;
 use std::pin::Pin;
 use std::str::FromStr;
@@ -144,22 +145,6 @@ impl Runtime {
             }
         }
     }
-
-    // TODO: it looks like the id/module pair should be in a separate data type, might
-    //       be worth to extract it in the future
-    // pub fn create_instances(
-    //     &mut self,
-    //     id: RunId,
-    //     count: usize,
-    //     instance: &'a Instance<'_>,
-    // ) -> Result<(), Error> {
-    //     let instances = self.instances.get_mut(&id).ok_or(Error::NoSuchRun(id))?;
-    //     for _ in (0..count).into_iter() {
-    //         instances.push(instance);
-    //     }
-    //
-    //     Ok(())
-    // }
 }
 
 pub struct WasiHostCtx {
@@ -268,9 +253,11 @@ impl WasiHostCtx {
 
             *reqw_req.body_mut() = request.body.map(|b| Body::from(b));
 
+            let instant = Instant::now();
             let response = client.execute(reqw_req).await.map_err(|err| HTTPError {
                 message: format!("Error when sending a request: {err:?}"),
             })?;
+            let _duration = instant.elapsed();
 
             let mut headers = HashMap::new();
             for (name, value) in response.headers().iter() {

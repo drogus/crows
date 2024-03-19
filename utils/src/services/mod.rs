@@ -1,9 +1,8 @@
-use crate::{self as utils, ModuleId};
-use serde::{Deserialize, Serialize};
+use crate::{self as utils};
 use crows_service::service;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
-use num_rational::Rational64;
 
 #[derive(Error, Debug, Serialize, Deserialize, Clone)]
 pub enum CoordinatorError {
@@ -16,7 +15,7 @@ pub enum CoordinatorError {
     #[error("Failed to compile module")]
     FailedToCompileModule,
     #[error("Couldn't fetch config: {0}")]
-    CouldNotFetchConfig(String)
+    CouldNotFetchConfig(String),
 }
 
 #[derive(Error, Debug, Serialize, Deserialize, Clone)]
@@ -27,6 +26,8 @@ pub enum WorkerError {
     ScenarioNotFound,
     #[error("could not create a module from binary")]
     CouldNotCreateModule,
+    #[error("could not create runtime: {0}")]
+    CouldNotCreateRuntime(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -55,7 +56,7 @@ pub trait WorkerToCoordinator {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum WorkerStatus {
     Available,
-    Busy
+    Busy,
 }
 
 #[service(variant = "server", other_side = Client)]
@@ -76,7 +77,6 @@ pub struct WorkerData {
 pub trait Worker {
     async fn upload_scenario(&mut self, name: String, content: Vec<u8>);
     async fn ping(&self) -> String;
-    // async fn prepare(&mut self, id: ModuleId, concurrency: usize, rate: Rational64) -> Result<RunId, WorkerError>;
     async fn start(&self, name: String, config: crows_shared::Config) -> Result<(), WorkerError>;
     async fn get_data(&self) -> WorkerData;
 }

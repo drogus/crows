@@ -55,25 +55,7 @@ impl Worker for WorkerService {
         todo!()
     }
 
-    // async fn prepare(
-    //     &mut self,
-    //     id: ModuleId,
-    //     concurrency: usize,
-    //     rate: Rational64,
-    // ) -> Result<RunId, WorkerError> {
-    //     let run_id: RunId = RunId::new();
-    //
-    //     // TODO: we should check if we have a given module available and if not ask coordinator
-    //     // to send it. For now let's assume we have the module id
-    //     let info = RunInfo::new(run_id.clone(), concurrency, rate, id);
-    //     self.runs.insert(run_id.clone(), info);
-    //
-    //     Ok(run_id)
-    // }
-
     async fn start(&self, name: String, config: crows_shared::Config) -> Result<(), WorkerError> {
-        // PLAN
-        // either pass as an argument or fetch Executor::Config?
         let locked = self.scenarios.read().await;
         let scenario = locked
             .get(&name)
@@ -81,9 +63,9 @@ impl Worker for WorkerService {
             .clone();
         drop(locked);
 
-        // TODO: remove unwrap
-        let runtime = Runtime::new(&scenario).unwrap();
-        let mut executor = Executors::get_executor(config, runtime).await;
+        let runtime = Runtime::new(&scenario)
+            .map_err(|err| WorkerError::CouldNotCreateRuntime(err.to_string()))?;
+        let mut executor = Executors::create_executor(config, runtime).await;
         // TODO: prepare should be an entirely separate step and coordinator should wait for
         // prepare from all of the workers
         executor.prepare().await;
@@ -102,9 +84,6 @@ impl Worker for WorkerService {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // TODO: allow to set the number of CPUs
-    let cpus = num_cpus::get();
-
     let coordinator_address: String =
         std::env::var("COORDINATOR_ADDRESS").unwrap_or("127.0.0.1:8181".into());
     let hostname: String = std::env::var("WORKER_NAME").unwrap();
@@ -142,7 +121,7 @@ enum Executors {
 }
 
 impl Executors {
-    pub async fn get_executor(config: Config, runtime: Runtime) -> Self {
+    pub async fn create_executor(config: Config, runtime: Runtime) -> Self {
         match config {
             Config::ConstantArrivalRate(config) => {
                 Executors::ConstantArrivalRateExecutor(ConstantArrivalRateExecutor {
@@ -175,6 +154,9 @@ struct ConstantArrivalRateExecutor {
     runtime: Runtime,
 }
 
+// TODO: k6 supports an option to set maximum number of VUs. For now
+// I haven't bothered to implement any limits, but it might be useful for bigger
+// tests maybe?
 impl Executor for ConstantArrivalRateExecutor {
     async fn run(&mut self) -> anyhow::Result<()> {
         let rate_per_second = self.config.rate as f64 / self.config.time_unit.as_secs_f64();
@@ -188,8 +170,16 @@ impl Executor for ConstantArrivalRateExecutor {
                     eprintln!("An error occurred while running a scenario: {err:?}");
                 }
             });
+            // TODO: at the moment we always sleep for a calculated amount of time
+            // This may be wrong, especially when duration is very low, because
+            // with a very high request rate the time needed to spawn a task may
+            // be substantial enough to delay execution. So technically we should
+            // calculate how much time passed since sending the previous request and
+            // only sleep for the remaining duration
             tokio::time::sleep(sleep_duration).await;
 
+            // TODO: wait for all of the allocated instances finish, ie. implement
+            // "graceful stop"
             if instant.elapsed() > self.config.duration {
                 return Ok(());
             }

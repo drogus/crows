@@ -3,47 +3,23 @@ use std::pin::Pin;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::ops::Deref;
 
 use futures::prelude::*;
+use futures::TryStreamExt;
 use std::future::Future;
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
-use tokio::{
-    sync::{
-        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-        oneshot,
-    },
-    time::sleep,
+use tokio::sync::{
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    oneshot,
 };
 use tokio_serde::formats::SymmetricalJson;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 use uuid::Uuid;
-use futures::TryStreamExt;
 
 pub use serde;
 pub use tokio;
 pub mod services;
 pub use crows_service;
-
-// ModuleId will be used to distinguish between different versions of modules
-// TODO: I don't have time to check the properties of the default Hash implementation
-//       it should be checked at some point. It's probably good enough, but I would like to confirm
-#[derive(Debug, Serialize, Deserialize, Clone, Hash, PartialEq, Eq)]
-pub struct ModuleId {
-    name: String,
-    version: String, // version will be a sha256 hash of the module contents
-}
-
-impl ModuleId {
-    pub fn new(name: String, content: &[u8]) -> Self {
-        let version = sha256::digest(content);
-
-        Self {
-            name,
-            version,
-        }
-    }
-}
 
 pub struct Server {
     listener: TcpListener,
@@ -246,6 +222,16 @@ impl Client {
                                         break;
                                     }
                                 } else {
+                                    // TODO: at the moment we block a service while executing a
+                                    // single request. this is because we allow to use &mut self
+                                    // in services and thus with the current implementation it
+                                    // would be hard to share the service object. It would be better to
+                                    // change it to always be &self and control the interior
+                                    // mutability with a lock. we could still allow for &mut
+                                    // methods, but only &mut methods would block. Another option
+                                    // would be to always use &self and thus require the
+                                    // implementation to deal with locking for each attribute that
+                                    // needs it
                                     let deserialized = serde_json::from_str::<<T as Service<DummyType>>::Request>(&message.message).unwrap();
                                     let response = service.handle_request(deserialized).await;
 
