@@ -5,6 +5,7 @@ use futures::Future;
 use reqwest::header::{HeaderName, HeaderValue};
 use reqwest::{Body, Request, Url};
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::{from_slice, to_vec};
 use std::collections::VecDeque;
 use std::pin::Pin;
@@ -183,7 +184,7 @@ impl WasiHostCtx {
         self.memory = Some(mem);
     }
 
-    pub async fn wrap_async<'a, U, F, E>(
+    pub async fn wrap_async<'a, T, U, F, E>(
         mut caller: Caller<'a, Self>,
         ptr: u32,
         len: u32,
@@ -192,10 +193,11 @@ impl WasiHostCtx {
     where
         F: for<'b> FnOnce(
             &'b mut Caller<'_, Self>,
-            HTTPRequest,
+            T,
         ) -> Pin<Box<dyn Future<Output = Result<U, E>> + 'b + Send>>,
         U: Serialize,
         E: Serialize,
+        T: DeserializeOwned,
     {
         let memory = get_memory(&mut caller)?;
 
