@@ -2,17 +2,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crows_shared::Config;
 use crows_wasm::{fetch_config, Instance};
 use futures::future::join_all;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 use crows_utils::services::{
     create_coordinator_server, create_worker_to_coordinator_server, CoordinatorError, WorkerClient,
-    WorkerStatus,
+    WorkerStatus, ClientClient
 };
 use crows_utils::services::{Coordinator, WorkerToCoordinator};
-use crows_utils::ModuleId;
 use uuid::Uuid;
 
 // TODO: I don't like the fact that we have to wrap the client in Mutex and option. It should
@@ -33,7 +31,7 @@ struct WorkerEntry {
 }
 
 impl WorkerToCoordinator for WorkerToCoordinatorService {
-    async fn ping(&mut self) -> String {
+    async fn ping(&mut self, _: WorkerClient) -> String {
         "OK".into()
     }
 }
@@ -45,7 +43,7 @@ struct CoordinatorService {
 }
 
 impl Coordinator for CoordinatorService {
-    async fn update_status(&self, status: WorkerStatus, id: Uuid) {
+    async fn update_status(&self, _client: ClientClient, _status: WorkerStatus, _id: Uuid) {
         todo!()
         // let workers = self.workers.lock().await;
         // let mut worker = workers.get(&id).unwrap();
@@ -54,6 +52,7 @@ impl Coordinator for CoordinatorService {
 
     async fn upload_scenario(
         &self,
+        _client: ClientClient,
         name: String,
         content: Vec<u8>,
     ) -> Result<(), CoordinatorError> {
@@ -78,7 +77,7 @@ impl Coordinator for CoordinatorService {
         Ok(())
     }
 
-    async fn start(&self, name: String, workers_number: usize) -> Result<(), CoordinatorError> {
+    async fn start(&self, _: ClientClient, name: String, workers_number: usize) -> Result<(), CoordinatorError> {
         // TODO: we should check if we have enough workers
         // TODO: also this way we will always choose the same workers. in the future we should
         // either always split between all workers or do some kind of round robin
@@ -106,7 +105,7 @@ impl Coordinator for CoordinatorService {
         Ok(())
     }
 
-    async fn list_workers(&self) -> Vec<String> {
+    async fn list_workers(&self, _: ClientClient) -> Vec<String> {
         self.workers
             .lock()
             .await
@@ -150,7 +149,7 @@ pub async fn main() {
             if let Some(mut client) = server.accept(service).await {
                 tokio::spawn(async move {
                     println!("Worker connected");
-                    let close_receiver = client.get_close_receiver();
+                    let close_receiver = client.get_close_receiver().await;
 
                     // sent all the current scenarios to a new worker node
                     let locked = scenarios.lock().await;

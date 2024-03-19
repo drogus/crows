@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -8,6 +9,7 @@ use futures::prelude::*;
 use futures::TryStreamExt;
 use std::future::Future;
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
+use tokio::sync::RwLock;
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -154,7 +156,12 @@ enum InternalMessage {
     RegisterListener(RegisterListener),
 }
 
+#[derive(Clone)]
 pub struct Client {
+    inner: Arc<RwLock<ClientInner>>,
+}
+
+struct ClientInner {
     sender: UnboundedSender<Message>,
     internal_sender: UnboundedSender<InternalMessage>,
     close_receiver: Option<oneshot::Receiver<()>>,
@@ -180,9 +187,8 @@ impl Client {
             respond_to: tx,
             message_id: message.id,
         };
-        self.internal_sender
-            .send(InternalMessage::RegisterListener(register_listener))?;
-        self.sender.send(message)?;
+        self.send_internal(InternalMessage::RegisterListener(register_listener)).await?;
+        self.send(message).await?;
 
         // TODO: rewrite to map
         match rx.await {
@@ -191,24 +197,46 @@ impl Client {
         }
     }
 
+    async fn send(
+        &self,
+        message: Message,
+    ) -> anyhow::Result<()> {
+        let inner = self.inner.read().await;
+
+        Ok(inner.sender.send(message)?)
+    }
+
+    async fn send_internal(
+        &self,
+        message: InternalMessage,
+    ) -> anyhow::Result<()> {
+        let inner = self.inner.read().await;
+
+        Ok(inner.internal_sender.send(message)?)
+    }
+
     pub fn new<T, DummyType>(
         sender: UnboundedSender<Message>,
         mut receiver: UnboundedReceiver<Message>,
         mut service: T,
         close_receiver: Option<oneshot::Receiver<()>>,
-    ) -> Self
+    ) -> <T as Service<DummyType>>::Client
     where
         T: Service<DummyType> + Send + Sync + 'static,
         <T as Service<DummyType>>::Request: Send,
         <T as Service<DummyType>>::Response: Send,
+        <T as Service<DummyType>>::Client: ClientTrait + Clone + Send + Sync + 'static,
     {
         let (internal_sender, mut internal_receiver) = unbounded_channel();
-        let client = Self {
-            sender: sender.clone(),
-            internal_sender,
-            close_receiver,
-        };
+        let client = T::Client::new(Self {
+            inner: Arc::new(RwLock::new(ClientInner {
+                sender: sender.clone(),
+                internal_sender,
+                close_receiver,
+            })),
+        });
 
+        let client_clone = client.clone();
         tokio::spawn(async move {
             let mut listeners: HashMap<Uuid, oneshot::Sender<String>> = HashMap::new();
             loop {
@@ -233,7 +261,7 @@ impl Client {
                                     // implementation to deal with locking for each attribute that
                                     // needs it
                                     let deserialized = serde_json::from_str::<<T as Service<DummyType>>::Request>(&message.message).unwrap();
-                                    let response = service.handle_request(deserialized).await;
+                                    let response = service.handle_request(client_clone.clone(), deserialized).await;
 
                                     let message = Message {
                                         id: Uuid::new_v4(),
@@ -266,12 +294,14 @@ impl Client {
         client
     }
 
-    pub fn get_close_receiver(&mut self) -> Option<oneshot::Receiver<()>> {
-        self.close_receiver.take()
+    pub async fn get_close_receiver(&self) -> Option<oneshot::Receiver<()>> {
+        let mut inner = self.inner.write().await;
+        inner.close_receiver.take()
     }
 
-    pub async fn wait(&mut self) {
-        if let Some(receiver) = self.close_receiver.take() {
+    pub async fn wait(&self) {
+        let mut inner = self.inner.write().await;
+        if let Some(receiver) = inner.close_receiver.take() {
             if let Err(e) = receiver.await {
                 println!("Got an error when waiting for oneshot receiver: {e:?}");
             }
@@ -287,12 +317,18 @@ pub struct Message {
     pub message_type: String,
 }
 
+pub trait ClientTrait {
+    fn new(client: Client) -> Self;
+}
+
 pub trait Service<DummyType>: Send + Sync {
     type Response: Send + Serialize;
     type Request: DeserializeOwned + Send;
+    type Client: ClientTrait + Clone + Send + Sync;
 
     fn handle_request(
         &mut self,
+        client: Self::Client,
         message: Self::Request,
     ) -> Pin<Box<dyn Future<Output = Self::Response> + Send + '_>>;
 }

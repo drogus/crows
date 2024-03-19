@@ -197,11 +197,11 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             }
 
             impl #server_ident {
-                pub async fn accept<T>(&self, service: T) -> Option<#other_side_client_ident>
+                pub async fn accept<T>(&self, service: T) -> Option<<(T,) as utils::Service<#dummy_ident>>::Client>
                 where (T,): utils::Service<#dummy_ident> + 'static {
                     let (sender, receiver, close_receiver) = self.server.accept().await?;
                     let client = utils::Client::new(sender, receiver, (service,), Some(close_receiver));
-                    Some(#other_side_client_ident {client})
+                    Some(client)
                 }
             }
 
@@ -219,14 +219,14 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
         let connect_to_ident = Ident::new(&format!("connect_to_{other_side_snake}"), ident.span());
         quote! {
             pub async fn #connect_to_ident<A, T>(addr: A, service: T)
-                -> Result<#other_side_client_ident, std::io::Error>
+                -> Result<<(T,) as utils::Service<#dummy_ident>>::Client, std::io::Error>
                 where
                     A: utils::tokio::net::ToSocketAddrs,
                     (T,): utils::Service<#dummy_ident> + 'static,
             {
                 let (sender, mut receiver) = utils::create_client(addr).await?;
                 let client = utils::Client::new(sender, receiver, (service,), None);
-                Ok(#other_side_client_ident { client })
+                Ok(client)
             }
         }
     };
@@ -300,12 +300,17 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             }
         });
 
+        // TODO: I don't have too much time at the moment and I want to finish a few other things,
+        // so I made a simplification in the services code at a cost of a slightly worse experience
+        // when implementing services. Now we *always* pass a client to service handler methods as
+        // a first argument. Ideally we would check if the client is defined as an argument and
+        // pass it only when needed.
         trait_methods.push(quote! {
-            fn #method_ident(#receiver, #(#args),*) -> impl std::future::Future<Output = #output_ty> + Send;
+            fn #method_ident(#receiver, client: #other_side_client_ident, #(#args),*) -> impl std::future::Future<Output = #output_ty> + Send;
         });
 
         service_match_arms.push(quote! {
-            #request_ident::#method_request_ident(request) => #response_ident::#method_response_ident(self.0.#method_ident(#(request.#arg_names),*).await),
+            #request_ident::#method_request_ident(request) => #response_ident::#method_response_ident(self.0.#method_ident(client, #(request.#arg_names),*).await),
         });
     }
 
@@ -320,9 +325,11 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
         where T: #ident + Send + Sync {
             type Request = #request_ident;
             type Response = #response_ident;
+            type Client = #other_side_client_ident;
 
             fn handle_request(
                 &mut self,
+                client: Self::Client,
                 message: Self::Request,
             ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Self::Response> + Send + '_>> {
                 Box::pin(async {
@@ -335,8 +342,8 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
     };
 
     let get_close_receiver = quote! {
-        pub fn get_close_receiver(&mut self) -> Option<tokio::sync::oneshot::Receiver<()>> {
-                self.client.get_close_receiver()
+        pub async fn get_close_receiver(&self) -> Option<tokio::sync::oneshot::Receiver<()>> {
+                self.client.get_close_receiver().await
             }
     };
 
@@ -361,9 +368,18 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             Response(#response_ident),
         }
 
+        #[derive(Clone)]
         pub struct #client_ident {
             // TODO: this should be prefixed
             client: utils::Client
+        }
+
+        impl utils::ClientTrait for #client_ident {
+            fn new(client: utils::Client) -> Self {
+                Self {
+                    client
+                }
+            }
         }
 
         impl #client_ident {
