@@ -1,22 +1,24 @@
 ## Crows
 
-Crows is a distributed load and stress testing runner. The tests can be written in any language that can compile to WASM given the bindings for the library are available. At the moment the bindings are available only for Rust, but once the ABIs are stable it should be relatively straight forward to add more languages.
-
-Crows is an experimental project for the time being.
+Crows is a distributed load and stress testing runner. The tests can be written in any language that can compile to WASM given the bindings for the library are available. At the moment the bindings are available only for Rust, but once the ABIs are stable it should be relatively straightforward to add more languages.
 
 ### Why crows?
 
-There are a lot of tools for stress testing available on the market, thus a question on why should you choose Crows or why is it a good idea to write Crows in the first place, is entirely valid. As Crows is more of a proof of concept than a production ready project I don't think you should use it for reason other than curiosity, but there are certain pain points Crows is supposed to solve:
+There are a lot of tools for stress testing available on the market, thus a question on why should you choose Crows or why is it a good idea to write Crows in the first place, is entirely valid. As Crows is more of a proof of concept than a production ready project I don't think you should use it for reason other than curiosity just yet, but here is a list of things I would like Crows to provide:
 
-* easy setup - no requirement for configuration files and setting things up-front. The only thing required to run Crows should be a single server that is reachable to workers and a worker or multiple workers that point to the coordinator server
-* distributed stress testing baked in - when you are stress testing a small web app you likely don't need much load and one server is enough. But what if you need to test millions of clients? Or millions of requests per second? Not only CPU saturation might be problematic, but also you may run into bandwidth problems or exhaust available ports for outgoing connections (roughly 64k per server per ip/port)
-* allow to write scenarios in a programming language and execute them dynamically. No static-files based scenarios
+* easy setup
+* distributed stress testing baked in
+* allow to write scenarios in a programming language and execute them dynamically
 * out of the box support for WebSockets and gRPC
-* low footprint and high speed. Stress testing shouldn't require beefy machines
-* support for multiple languages like Rust, TinyGo, AssemblyScript and potentially also JS/TS (although JavaScript doesn't compile to WASM it's possible to use WASI in order to plug JS/TS scripts into a WASM runtime)
-* multipe executors. A constant arrival rate executor is a must (which surprisingly not many tools support, with a notable exception of K6)
-* out of the box metrics with support of Prometheus
-* out of the box logs gathering
+* low footprint and high speed
+* support for multiple languages like Rust, TinyGo, AssemblyScript and potentially also JS/TS in the future
+* multipe scenario execution modes
+* out of the box metrics with support for Prometheus
+* out of the box logs gathering for easier debugging
+
+#### What works now?
+
+TODO
 
 ### Usage
 
@@ -100,9 +102,9 @@ In the future I think I might change the serialization format to something like 
 
 #### Worker
 
-Worker is one of the most interesting parts of the project, in my humble opinion. A worker runs N threads, where N by default is a number of CPUs. Each thread runs an asynchronous runtime - Tokio at the moment. As workers will mostly work on a very similar workloads I think it makes sense to use this kind of "share nothing" approach. It might be also potentially faster than running one runtime with multiple threads. I also don't rule out trying out different runtimes and I'm especially curious to try out Tokio with IO-uring.
+Worker is one of the most interesting parts of the project, in my humble opinion. A workers runs on top of a Tokio asynchronous runtime. All of the scenarios are executed in the context of the async runtime, thus even though the scenarios are written like you would normally write synchronous code, they will be executed in an asynchronous wait under the hood.
 
-Each of the worker threads can run multiple instances of wasmtime environments. Each wasmtime environment can run functions from the WASM module containing a scenario. All the IO operations are done on the host side and thus WASM modules only call the host defined functions. For example in order to make an HTTP request:
+When a scenario is being executed a WASM runtime, using Wasmtime, is created. All the IO operations are done on the host side and thus WASM modules only call the host defined functions. For example in order to make an HTTP request:
 
 1. The WASM module prepares an `HTTPRequest` object and writes it to WASM linear memory
 2. The WASM module calls the `http_request` binding that in turn executes code in the Tokio runtime
@@ -116,7 +118,7 @@ WASM modules are compiled as WASI enabled modules, which means it's possible to 
 
 #### Executors
 
-TODO
+Executors define how scenarios are being executed
 
 ### Roadmap/TODO
 
