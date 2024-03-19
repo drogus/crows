@@ -4,9 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-crows-utils = { path = "../utils" }
 slab = "0.4"
-crows-bindings = { path = "../bindings" }
 async-trait = "0.1"
 reqwest = "0.11"
 
@@ -17,6 +15,10 @@ wasmtime.workspace = true
 wasmtime-wasi.workspace = true
 wasi-common.workspace = true
 wiggle.workspace = true
-borsh.workspace = true
 futures.workspace = true
 bytes.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+crows-shared.workspace = true
+crows-utils.workspace = true
+crows-bindings.workspace = true

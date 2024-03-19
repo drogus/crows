@@ -21,3 +21,4 @@ tokio-util.workspace = true
 tokio-serde.workspace = true
 futures.workspace = true
 num-rational.workspace = true
+crows-shared.workspace = true

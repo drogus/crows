@@ -6,11 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-crows-utils = { path = "../utils" }
 byteorder = "1.4"
-crows-service = { path = "../service" }
-crows-wasm = { path = "../wasm" }
 num_cpus = "1.16"
+tokio-timer = "0.2"
 
 uuid.workspace = true
 serde.workspace = true
@@ -23,3 +21,7 @@ tokio-util.workspace = true
 futures.workspace = true
 wasmtime.workspace = true
 num-rational.workspace = true
+crows-utils.workspace = true
+crows-wasm.workspace = true
+crows-service.workspace = true
+crows-shared.workspace = true

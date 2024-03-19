@@ -1,5 +1,5 @@
 [package]
-name = "crows-bindings"
+name = "crows-shared"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,6 +8,3 @@ edition = "2021"
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-serde_with.workspace = true
-crows-macros.workspace = true
-crows-shared.workspace = true

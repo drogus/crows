@@ -1,17 +1,23 @@
 use anyhow::anyhow;
-use borsh::{from_slice, to_vec, BorshDeserialize, BorshSerialize};
 use crows_bindings::{HTTPError, HTTPMethod, HTTPRequest, HTTPResponse};
 use crows_utils::services::RunId;
 use futures::Future;
 use reqwest::header::{HeaderName, HeaderValue};
 use reqwest::{Body, Request, Url};
+use serde::Serialize;
+use serde_json::{from_slice, to_vec};
+use std::collections::VecDeque;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
 use std::{any::Any, collections::HashMap, io::IoSlice};
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot;
+use tokio::sync::{Mutex, RwLock};
 use wasi_common::file::{FdFlags, FileType};
 use wasi_common::WasiFile;
-use wasmtime::{Caller, Config, Engine, Linker, Memory, MemoryType, Module, Store};
+use wasmtime::{Caller, Engine, Linker, Memory, MemoryType, Module, Store};
 use wasmtime_wasi::{StdoutStream, StreamResult};
 
 #[derive(thiserror::Error, Debug)]
@@ -20,26 +26,124 @@ pub enum Error {
     NoSuchRun(RunId),
 }
 
-// A runtime should be run in a single async runtime. Ideally also in a single
-// thread as we want a share-nothing architecture for performance and simplicity
-pub struct Runtime<'a> {
-    // we index instances with the run id, cause technically we can run
-    // scenarios from multiple modules on a single runtime
-    // TODO: might be simpler to assume only one module? I'm not sure yet if it's worth
-    // it. If the overhead is too big I'd probably refactor it to allow only one module
-    // at any point in time. I would like to start with multiple modules, though, to first
-    // see if it's actually problematic, maybe it's not and it seems to give more flexibility
-    pub instances: HashMap<RunId, Vec<Instance<'a>>>,
-    pub environment: Environment,
+enum RuntimeMessage {
+    RunTest(oneshot::Sender<()>),
 }
 
-impl<'a> Runtime<'a> {
-    pub fn new() -> anyhow::Result<Self> {
+#[derive(Clone)]
+pub struct InstanceHandle {
+    inner: Option<InstanceHandleInner>,
+}
+
+#[derive(Clone)]
+pub struct InstanceHandleInner {
+    sender: UnboundedSender<RuntimeMessage>,
+    runtime: Arc<RwLock<RuntimeInner>>,
+}
+
+impl InstanceHandle {
+    pub async fn run_test(&self) -> anyhow::Result<()> {
+        let (sender, receiver) = oneshot::channel();
+        let inner = self
+            .inner
+            .iter()
+            .next()
+            .expect("Inner should be available before drop");
+        inner.sender.send(RuntimeMessage::RunTest(sender))?;
+        receiver.await?;
+        Ok(())
+    }
+}
+
+pub struct RuntimeInner {
+    pub instances: VecDeque<InstanceHandle>,
+}
+
+pub struct Runtime {
+    pub environment: Environment,
+    pub module: Module,
+
+    inner: Arc<RwLock<RuntimeInner>>,
+}
+
+impl Drop for InstanceHandle {
+    // once we drop the instance handle we want it to get back to the queue
+    // not sure if I like it, but I don't have time and motivation to rewrite it for now
+    fn drop(&mut self) {
+        if let Some(inner) = self.inner.take() {
+            tokio::spawn(async move {
+                let mut runtime = inner.runtime.write().await;
+                runtime
+                    .instances
+                    .push_back(InstanceHandle { inner: Some(inner.clone()) });
+            });
+        }
+    }
+}
+
+impl Runtime {
+    pub fn new(content: &Vec<u8>) -> anyhow::Result<Self> {
+        let environment = Environment::new()?;
+        let module = Module::from_binary(&environment.engine, content)?;
         Ok(Self {
-            instances: HashMap::new(),
-            environment: Environment::new()?,
+            module,
+            environment,
+            inner: Arc::new(RwLock::new(RuntimeInner {
+                instances: VecDeque::new(),
+            })),
         })
     }
+
+    pub async fn reserve_instance(&self) -> anyhow::Result<()> {
+        let (sender, receiver) = unbounded_channel();
+        let inner = InstanceHandleInner {
+            sender,
+            runtime: self.inner.clone(),
+        };
+        let handle = InstanceHandle { inner: Some(inner) };
+
+        let (instance, _io_handle, store) = Instance::new(&self.environment, &self.module).await?;
+
+        tokio::spawn(async move {
+            let mut store = store;
+            let mut receiver = receiver;
+            let mut instance = instance;
+
+            while let Some(message) = receiver.recv().await {
+                match message {
+                    RuntimeMessage::RunTest(sender) => {
+                        // TODO: remove this unwrap
+                        run_wasm(&mut instance, &mut store).await.unwrap();
+                        sender.send(()).unwrap();
+                    }
+                }
+            }
+        });
+
+        let mut inner = self.inner.write().await;
+        inner.instances.push_back(handle);
+
+        Ok(())
+    }
+
+    pub async fn fetch_instance(&self) -> Option<InstanceHandle> {
+        let mut inner = self.inner.write().await;
+        inner.instances.pop_front()
+    }
+
+    pub async fn fetch_or_create_instance(&self) -> anyhow::Result<InstanceHandle> {
+        // TODO: I don't have time to refactor this code, but I don't really like trying in a loop
+        // the loop is needed because if we create instance and other task fetches it, we might
+        // still end up with None
+        loop {
+            if let Some(handle) = self.fetch_instance().await {
+                return Ok(handle);
+            } else {
+                self.reserve_instance().await?;
+            }
+        }
+    }
+
     // TODO: it looks like the id/module pair should be in a separate data type, might
     //       be worth to extract it in the future
     // pub fn create_instances(
@@ -57,7 +161,7 @@ impl<'a> Runtime<'a> {
     // }
 }
 
-struct WasiHostCtx {
+pub struct WasiHostCtx {
     preview2_ctx: wasmtime_wasi::WasiCtx,
     preview2_table: wasmtime::component::ResourceTable,
     preview1_adapter: wasmtime_wasi::preview1::WasiPreview1Adapter,
@@ -86,9 +190,12 @@ impl WasiHostCtx {
         f: F,
     ) -> anyhow::Result<u64>
     where
-        F: for<'b> FnOnce(&'b mut Caller<'_, Self>, HTTPRequest) -> Pin<Box<dyn Future<Output = Result<U, E>> + 'b + Send>>,
-        U: BorshSerialize,
-        E: BorshSerialize,
+        F: for<'b> FnOnce(
+            &'b mut Caller<'_, Self>,
+            HTTPRequest,
+        ) -> Pin<Box<dyn Future<Output = Result<U, E>> + 'b + Send>>,
+        U: Serialize,
+        E: Serialize,
     {
         let memory = get_memory(&mut caller)?;
 
@@ -184,6 +291,23 @@ impl WasiHostCtx {
         })
     }
 
+    pub fn set_config(mut caller: Caller<'_, Self>, ptr: u32, len: u32) -> anyhow::Result<u32> {
+        let memory = get_memory(&mut caller)?;
+
+        let slice = memory
+            .data(&caller)
+            .get(ptr as usize..(ptr + len) as usize)
+            .ok_or(anyhow!("Could not get memory slice"))?
+            .to_owned()
+            .into_boxed_slice();
+
+        let (_, store) = memory.data_and_store_mut(&mut caller);
+
+        let index = store.buffers.insert(slice);
+
+        Ok(index as u32)
+    }
+
     pub fn consume_buffer(
         mut caller: Caller<'_, Self>,
         index: u32,
@@ -227,22 +351,19 @@ impl wasmtime_wasi::preview1::WasiPreview1View for WasiHostCtx {
     }
 }
 
+#[derive(Clone)]
 pub struct Environment {
     engine: Engine,
     linker: Linker<WasiHostCtx>,
 }
 
-pub struct Instance<'a> {
-    engine: &'a Engine,
-    module: Module,
-    linker: &'a Linker<WasiHostCtx>,
-    store: wasmtime::Store<WasiHostCtx>,
+pub struct Instance {
     instance: wasmtime::Instance,
 }
 
 impl Environment {
     pub fn new() -> anyhow::Result<Self> {
-        let mut config = Config::new();
+        let mut config = wasmtime::Config::new();
         config.async_support(true);
         config.consume_fuel(true);
 
@@ -260,6 +381,9 @@ impl Environment {
                 })
             })
             .unwrap();
+        linker
+            .func_wrap("crows", "set_config", WasiHostCtx::set_config)
+            .unwrap();
 
         wasmtime_wasi::preview1::add_to_linker_async(&mut linker)?;
 
@@ -271,16 +395,30 @@ pub fn get_memory<T>(caller: &mut Caller<'_, T>) -> anyhow::Result<Memory> {
     Ok(caller.get_export("memory").unwrap().into_memory().unwrap())
 }
 
-impl<'a> Instance<'a> {
-    pub fn new_store(
-        engine: &Engine,
-    ) -> anyhow::Result<(wasmtime::Store<WasiHostCtx>, UnboundedReceiver<Vec<u8>>)> {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+pub struct IoHandle {
+    pub stdout: UnboundedReceiver<Vec<u8>>,
+    pub stderr: UnboundedReceiver<Vec<u8>>,
+}
 
-        let stdout = RemoteStdout { sender };
+impl Instance {
+    pub fn new_store(engine: &Engine) -> anyhow::Result<(wasmtime::Store<WasiHostCtx>, IoHandle)> {
+        let (stdout_sender, stdout_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (stderr_sender, stderr_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let io_handle = IoHandle {
+            stdout: stdout_receiver,
+            stderr: stderr_receiver,
+        };
+
+        let stdout = RemoteIo {
+            sender: stdout_sender,
+        };
+        let stderr = RemoteIo {
+            sender: stderr_sender,
+        };
 
         let wasi_ctx = wasmtime_wasi::WasiCtxBuilder::new()
             .stdout(stdout)
+            .stderr(stderr)
             // .inherit_stdio()
             .build();
 
@@ -302,56 +440,59 @@ impl<'a> Instance<'a> {
         store.fuel_async_yield_interval(Some(10000))?;
         store.set_fuel(u64::MAX).unwrap();
 
-        Ok((store, receiver))
+        Ok((store, io_handle))
     }
 
     pub async fn new(
-        raw_module: &Vec<u8>,
-        env: &'a Environment,
-    ) -> anyhow::Result<(Self, UnboundedReceiver<Vec<u8>>)> {
-        let module = Module::from_binary(&env.engine, raw_module)?;
+        env: &Environment,
+        module: &Module,
+    ) -> anyhow::Result<(Self, IoHandle, Store<WasiHostCtx>)> {
+        let (mut store, io_handle) = Instance::new_store(&env.engine)?;
+        let instance = env.linker.instantiate_async(&mut store, module).await?;
 
-        let (mut store, stdout_receiver) = Instance::new_store(&env.engine)?;
-        let instance = env.linker.instantiate_async(&mut store, &module).await?;
-
-        // let func = instance
-        // .clone()
-        // .get_typed_func::<(), ()>(&mut store, "test")?;
-
-        // func.call_async(&mut store, ()).await?;
-
-        // drop(store);
-
-        Ok((
-            Self {
-                engine: &env.engine,
-                module,
-                linker: &env.linker,
-                store,
-                instance,
-            },
-            stdout_receiver,
-        ))
+        let result = Self { instance };
+        Ok((result, io_handle, store))
     }
 }
 
-pub async fn run_wasm(instance: &mut Instance<'_>) -> anyhow::Result<()> {
+pub async fn run_wasm(
+    instance: &mut Instance,
+    mut store: &mut Store<WasiHostCtx>,
+) -> anyhow::Result<()> {
     let func = instance
         .instance
-        .get_typed_func::<(), ()>(&mut instance.store, "test")?;
+        .get_typed_func::<(), ()>(&mut store, "test")?;
 
-    func.call_async(&mut instance.store, ()).await?;
+    func.call_async(&mut store, ()).await?;
 
     Ok(())
 }
 
+pub async fn fetch_config(
+    mut instance: Instance,
+    mut store: &mut Store<WasiHostCtx>,
+) -> anyhow::Result<crows_shared::Config> {
+    let func = instance
+        .instance
+        .get_typed_func::<(), u32>(&mut store, "__config")?;
+
+    let index = func.call_async(&mut store, ()).await?;
+    let buffer = store
+        .data_mut()
+        .buffers
+        .try_remove(index as usize)
+        .ok_or(anyhow!("Couldn't find slab"))?;
+
+    Ok(from_slice(&buffer)?)
+}
+
 #[derive(Clone)]
-struct RemoteStdout {
+struct RemoteIo {
     sender: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
 }
 
 #[wiggle::async_trait]
-impl WasiFile for RemoteStdout {
+impl WasiFile for RemoteIo {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -372,7 +513,7 @@ impl WasiFile for RemoteStdout {
     }
 }
 
-impl wasmtime_wasi::HostOutputStream for RemoteStdout {
+impl wasmtime_wasi::HostOutputStream for RemoteIo {
     fn write(&mut self, bytes: bytes::Bytes) -> StreamResult<()> {
         self.sender.send(bytes.to_vec()).unwrap();
 
@@ -388,7 +529,7 @@ impl wasmtime_wasi::HostOutputStream for RemoteStdout {
     }
 }
 
-impl StdoutStream for RemoteStdout {
+impl StdoutStream for RemoteIo {
     fn stream(&self) -> Box<dyn wasmtime_wasi::HostOutputStream> {
         Box::new(self.clone())
     }
@@ -399,6 +540,6 @@ impl StdoutStream for RemoteStdout {
 }
 
 #[async_trait::async_trait]
-impl wasmtime_wasi::Subscribe for RemoteStdout {
+impl wasmtime_wasi::Subscribe for RemoteIo {
     async fn ready(&mut self) {}
 }

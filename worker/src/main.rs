@@ -1,19 +1,20 @@
-#![feature(async_fn_in_trait)]
-#![feature(return_position_impl_trait_in_trait)]
-
+use crows_shared::{Config, ConstantArrivalRateConfig};
 use crows_wasm::Runtime;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Instant;
 use std::{collections::HashMap, env::args_os, time::Duration};
-use tokio::sync::{RwLock, Mutex};
-use tokio::time::sleep;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::{Mutex, RwLock};
+use tokio::time::{sleep, timeout, Timeout};
 use uuid::Uuid;
 
-use crows_utils::services::{connect_to_worker_to_coordinator, Worker, WorkerData, WorkerError, RunId};
-use crows_utils::ModuleId;
+use crows_utils::services::{
+    connect_to_worker_to_coordinator, RunId, Worker, WorkerData, WorkerError,
+};
 use num_rational::Rational64;
 
-type ScenariosList = Arc<RwLock<HashMap<ModuleId, Vec<u8>>>>;
+type ScenariosList = Arc<RwLock<HashMap<String, Vec<u8>>>>;
 
 // TODO: in the future we should probably share it with the coordinator, ie.
 // coordinator should prepare the defaults based on the default module settings
@@ -23,55 +24,70 @@ struct RunInfo {
     run_id: RunId,
     concurrency: usize,
     rate: Rational64,
-    module_id: ModuleId,
+    module_name: String,
 }
 
 impl RunInfo {
-    fn new(run_id: RunId, concurrency: usize, rate: Rational64, module_id: ModuleId) -> Self {
-        Self { run_id, concurrency, rate, module_id }
+    fn new(run_id: RunId, concurrency: usize, rate: Rational64, module_name: String) -> Self {
+        Self {
+            run_id,
+            concurrency,
+            rate,
+            module_name,
+        }
     }
 }
 
 #[derive(Clone)]
-struct WorkerService<'a> {
+struct WorkerService {
     scenarios: ScenariosList,
     hostname: String,
-    wasm_handles: Arc<Mutex<Vec<RuntimeHandle<'a>>>>,
-    runs: HashMap<RunId, RunInfo>
+    runs: HashMap<RunId, RunInfo>,
+    environment: crows_wasm::Environment,
 }
 
-impl<'a> Worker for WorkerService<'a> {
-    async fn upload_scenario(&mut self, id: ModuleId, content: Vec<u8>) {
-        self.scenarios.write().await.insert(id, content);
+impl Worker for WorkerService {
+    async fn upload_scenario(&mut self, name: String, content: Vec<u8>) {
+        self.scenarios.write().await.insert(name, content);
     }
 
     async fn ping(&self) -> String {
         todo!()
     }
 
-    async fn prepare(&mut self, id: ModuleId, concurrency: usize, rate: Rational64) -> Result<RunId, WorkerError> {
-        let run_id: RunId = RunId::new();
+    // async fn prepare(
+    //     &mut self,
+    //     id: ModuleId,
+    //     concurrency: usize,
+    //     rate: Rational64,
+    // ) -> Result<RunId, WorkerError> {
+    //     let run_id: RunId = RunId::new();
+    //
+    //     // TODO: we should check if we have a given module available and if not ask coordinator
+    //     // to send it. For now let's assume we have the module id
+    //     let info = RunInfo::new(run_id.clone(), concurrency, rate, id);
+    //     self.runs.insert(run_id.clone(), info);
+    //
+    //     Ok(run_id)
+    // }
 
-        // TODO: we should check if we have a given module available and if not ask coordinator
-        // to send it. For now let's assume we have the module id
-        let info = RunInfo::new(run_id.clone(), concurrency, rate, id);
-        self.runs.insert(run_id.clone(), info);
-
-        Ok(run_id)
-    }
-
-    async fn start(&self, id: ModuleId, concurrency: usize) -> Result<(), WorkerError> {
-        let locked = self
-            .scenarios
-            .read()
-            .await;
+    async fn start(&self, name: String, config: crows_shared::Config) -> Result<(), WorkerError> {
+        // PLAN
+        // either pass as an argument or fetch Executor::Config?
+        let locked = self.scenarios.read().await;
         let scenario = locked
-            .get(&id)
+            .get(&name)
             .ok_or(WorkerError::ScenarioNotFound)?
             .clone();
         drop(locked);
 
-        // spawn modules 
+        // TODO: remove unwrap
+        let runtime = Runtime::new(&scenario).unwrap();
+        let mut executor = Executors::get_executor(config, runtime).await;
+        // TODO: prepare should be an entirely separate step and coordinator should wait for
+        // prepare from all of the workers
+        executor.prepare().await;
+        executor.run().await;
 
         Ok(())
     }
@@ -84,80 +100,108 @@ impl<'a> Worker for WorkerService<'a> {
     }
 }
 
-#[derive(Clone)]
-struct RuntimeHandle<'a> {
-    runtime: Arc<Mutex<Runtime<'a>>>,
-}
-
-impl<'a> RuntimeHandle<'a> {
-    pub fn new(runtime: Runtime<'a>) -> Self {
-        Self { runtime: Arc::new(Mutex::new(runtime)) }
-    }
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // TODO: allow to set the number of CPUs
     let cpus = num_cpus::get();
 
-    let coordinator_address: String = std::env::var("COORDINATOR_ADDRESS").unwrap();
+    let coordinator_address: String =
+        std::env::var("COORDINATOR_ADDRESS").unwrap_or("127.0.0.1:8181".into());
     let hostname: String = std::env::var("WORKER_NAME").unwrap();
 
     println!("Starting with hostname: {hostname}");
-    let handles: Arc<Mutex<Vec<RuntimeHandle>>> = Default::default();
+    // let handles: Vec<RuntimeHandle> = Default::default();
     let scenarios: ScenariosList = Default::default();
+
     let service = WorkerService {
         scenarios: scenarios.clone(),
         hostname,
-        wasm_handles: handles.clone(),
-        runs: Default::default()
+        runs: Default::default(),
+        environment: crows_wasm::Environment::new().unwrap(),
     };
 
-    std::thread::scope(|s| {
-        let mut threads = Vec::new();
+    println!("Connecting to {coordinator_address}");
+    let mut client = connect_to_worker_to_coordinator(coordinator_address, service)
+        .await
+        .unwrap();
 
-        let thread = s.spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap();
+    loop {
+        // TODO: pinging should also work as an indicator of connection being alive
+        client.ping();
+        sleep(Duration::from_secs(1));
+    }
+}
 
-            rt.spawn(async move {
-                println!("Connecting to {coordinator_address}");
-                let mut client = connect_to_worker_to_coordinator(coordinator_address, service)
-                    .await
-                    .unwrap();
+trait Executor {
+    async fn prepare(&mut self) -> anyhow::Result<()>;
+    async fn run(&mut self) -> anyhow::Result<()>;
+}
 
-                loop {
-                    // TODO: pinging should also work as an indicator of connection being alive
-                    client.ping();
-                    sleep(Duration::from_secs(1));
+enum Executors {
+    ConstantArrivalRateExecutor(ConstantArrivalRateExecutor),
+}
+
+impl Executors {
+    pub async fn get_executor(config: Config, runtime: Runtime) -> Self {
+        match config {
+            Config::ConstantArrivalRate(config) => {
+                Executors::ConstantArrivalRateExecutor(ConstantArrivalRateExecutor {
+                    config,
+                    runtime,
+                })
+            }
+        }
+    }
+
+    pub async fn run(&mut self) {
+        match self {
+            Executors::ConstantArrivalRateExecutor(ref mut executor) => {
+                executor.run().await.unwrap()
+            }
+        }
+    }
+
+    pub async fn prepare(&mut self) {
+        match self {
+            Executors::ConstantArrivalRateExecutor(ref mut executor) => {
+                executor.prepare().await.unwrap()
+            }
+        }
+    }
+}
+
+struct ConstantArrivalRateExecutor {
+    config: ConstantArrivalRateConfig,
+    runtime: Runtime,
+}
+
+impl Executor for ConstantArrivalRateExecutor {
+    async fn run(&mut self) -> anyhow::Result<()> {
+        let rate_per_second = self.config.rate as f64 / self.config.time_unit.as_secs_f64();
+        let sleep_duration = Duration::from_secs_f64(1.0 / rate_per_second);
+
+        let instant = Instant::now();
+        loop {
+            let handle = self.runtime.fetch_or_create_instance().await?;
+            tokio::spawn(async move {
+                if let Err(err) = handle.run_test().await {
+                    eprintln!("An error occurred while running a scenario: {err:?}");
                 }
             });
-        });
+            tokio::time::sleep(sleep_duration).await;
 
-        threads.push(thread);
+            if instant.elapsed() > self.config.duration {
+                return Ok(());
+            }
+        }
+    }
 
-        for _ in (0..cpus).into_iter() {
-            let scenarios = scenarios.clone();
-            let handles = handles.clone();
-            let thread = s.spawn(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap();
-                let wasm_runtime = RuntimeHandle::new(Runtime::new().expect("Couldn't create a Runtime"));
-
-                rt.spawn(async move {
-                    handles.lock().await.push(wasm_runtime.clone());
-                });
-            });
-            threads.push(thread);
+    async fn prepare(&mut self) -> anyhow::Result<()> {
+        let vus = self.config.allocated_vus;
+        for _ in 0..vus {
+            self.runtime.reserve_instance().await?;
         }
 
-        for thread in threads {
-            thread.join();
-        }
-    });
-
-    Ok(())
+        Ok(())
+    }
 }

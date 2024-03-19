@@ -1,7 +1,12 @@
-use borsh::{from_slice, to_vec, BorshDeserialize, BorshSerialize};
-use std::{cell::RefCell, collections::HashMap, mem::MaybeUninit};
+use std::{cell::RefCell, collections::HashMap};
 
-#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
+pub use crows_macros::config;
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
+use serde_json::{to_vec, from_slice};
+pub use crows_shared::Config as ExecutorConfig;
+pub use crows_shared::ConstantArrivalRateConfig;
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub enum HTTPMethod {
     HEAD,
     GET,
@@ -11,7 +16,7 @@ pub enum HTTPMethod {
     OPTIONS,
 }
 
-#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct HTTPRequest {
     // TODO: these should not be public I think, I'd prefer to do a public interface for them
     pub url: String,
@@ -20,12 +25,12 @@ pub struct HTTPRequest {
     pub body: Option<String>,
 }
 
-#[derive(Debug, BorshDeserialize, BorshSerialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct HTTPError {
     pub message: String,
 }
 
-#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub struct HTTPResponse {
     // TODO: these should not be public I think, I'd prefer to do a public interface for them
     pub headers: HashMap<String, String>,
@@ -46,14 +51,21 @@ mod bindings {
         pub fn log(content: *mut u8, content_len: usize);
         pub fn http(content: *mut u8, content_len: usize) -> u64;
         pub fn consume_buffer(index: u32, content: *mut u8, content_len: usize);
+        pub fn set_config(content: *mut u8, content_len: usize) -> u32;
     }
 }
 
 fn with_buffer<R>(f: impl FnOnce(&mut Vec<u8>) -> R) -> R {
-    let mut buffer: Vec<u8> = Vec::with_capacity(256);
+    // using a buffer saved in thread_local allows us to share it between function calls
+    thread_local! {
+        static BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::with_capacity(1024));
+    }
 
-    buffer.clear();
-    f(&mut buffer)
+    BUFFER.with(|r| {
+        let mut buf = r.borrow_mut();
+        buf.clear();
+        f(&mut buf)
+    })
 }
 
 pub fn http_request(
@@ -77,9 +89,9 @@ pub fn http_request(
 
 fn call_host_function<T, R, E>(arguments: &T, f: impl FnOnce(&mut Vec<u8>) -> u64) -> Result<R, E>
 where
-    T: BorshSerialize,
-    R: BorshDeserialize,
-    E: BorshDeserialize,
+    T: Serialize,
+    R: DeserializeOwned,
+    E: DeserializeOwned,
 {
     let mut encoded = to_vec(arguments).unwrap();
 
@@ -104,4 +116,9 @@ where
     } else {
         Err(from_slice(&buf).expect("Couldn't decode message from the host"))
     }
+}
+
+pub fn __set_config(config: ExecutorConfig) -> u32 {
+    let mut encoded = to_vec(&config).unwrap();
+    unsafe { bindings::set_config(encoded.as_mut_ptr(), encoded.len()) }
 }
