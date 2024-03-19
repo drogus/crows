@@ -159,11 +159,11 @@ enum InternalMessage {
 #[derive(Clone)]
 pub struct Client {
     inner: Arc<RwLock<ClientInner>>,
+    sender: UnboundedSender<Message>,
+    internal_sender: UnboundedSender<InternalMessage>,
 }
 
 struct ClientInner {
-    sender: UnboundedSender<Message>,
-    internal_sender: UnboundedSender<InternalMessage>,
     close_receiver: Option<oneshot::Receiver<()>>,
 }
 
@@ -187,7 +187,8 @@ impl Client {
             respond_to: tx,
             message_id: message.id,
         };
-        self.send_internal(InternalMessage::RegisterListener(register_listener)).await?;
+        self.send_internal(InternalMessage::RegisterListener(register_listener))
+            .await?;
         self.send(message).await?;
 
         // TODO: rewrite to map
@@ -197,22 +198,12 @@ impl Client {
         }
     }
 
-    async fn send(
-        &self,
-        message: Message,
-    ) -> anyhow::Result<()> {
-        let inner = self.inner.read().await;
-
-        Ok(inner.sender.send(message)?)
+    async fn send(&self, message: Message) -> anyhow::Result<()> {
+        Ok(self.sender.send(message)?)
     }
 
-    async fn send_internal(
-        &self,
-        message: InternalMessage,
-    ) -> anyhow::Result<()> {
-        let inner = self.inner.read().await;
-
-        Ok(inner.internal_sender.send(message)?)
+    async fn send_internal(&self, message: InternalMessage) -> anyhow::Result<()> {
+        Ok(self.internal_sender.send(message)?)
     }
 
     pub fn new<T, DummyType>(
@@ -229,11 +220,9 @@ impl Client {
     {
         let (internal_sender, mut internal_receiver) = unbounded_channel();
         let client = T::Client::new(Self {
-            inner: Arc::new(RwLock::new(ClientInner {
-                sender: sender.clone(),
-                internal_sender,
-                close_receiver,
-            })),
+            inner: Arc::new(RwLock::new(ClientInner { close_receiver })),
+            sender: sender.clone(),
+            internal_sender,
         });
 
         let client_clone = client.clone();

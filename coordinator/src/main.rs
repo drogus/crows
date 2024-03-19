@@ -88,6 +88,7 @@ impl Coordinator for CoordinatorService {
         let scenarios = self.scenarios.lock().await;
         let scenario = scenarios.get(&name).ok_or(CoordinatorError::NoSuchModule(name.clone()))?.to_owned();
         drop(scenarios);
+
         let runtime = crows_wasm::Runtime::new(&scenario).map_err(|err| CoordinatorError::FailedToCreateRuntime(err.to_string()))?;
         let (instance, _, mut store) = Instance::new(&runtime.environment, &runtime.module).await.map_err(|_| CoordinatorError::FailedToCompileModule)?;
         let config = fetch_config(instance, &mut store).await.map_err(|err| CoordinatorError::CouldNotFetchConfig(err.to_string()))?.split(workers_number);
