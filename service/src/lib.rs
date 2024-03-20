@@ -197,10 +197,10 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             }
 
             impl #server_ident {
-                pub async fn accept<T>(&self, service: T) -> Option<<(T,) as utils::Service<#dummy_ident>>::Client>
-                where (T,): utils::Service<#dummy_ident> + 'static {
+                pub async fn accept<T>(&self, service: T) -> Option<<T as utils::Service<#dummy_ident>>::Client>
+                where T: utils::Service<#dummy_ident> + 'static {
                     let (sender, receiver, close_receiver) = self.server.accept().await?;
-                    let client = utils::Client::new(sender, receiver, (service,), Some(close_receiver));
+                    let client = utils::Client::new(sender, receiver, service, Some(close_receiver));
                     Some(client)
                 }
             }
@@ -219,13 +219,13 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
         let connect_to_ident = Ident::new(&format!("connect_to_{other_side_snake}"), ident.span());
         quote! {
             pub async fn #connect_to_ident<A, T>(addr: A, service: T)
-                -> Result<<(T,) as utils::Service<#dummy_ident>>::Client, std::io::Error>
+                -> Result<<T as utils::Service<#dummy_ident>>::Client, std::io::Error>
                 where
                     A: utils::tokio::net::ToSocketAddrs,
-                    (T,): utils::Service<#dummy_ident> + 'static,
+                    T: utils::Service<#dummy_ident> + 'static,
             {
                 let (sender, mut receiver) = utils::create_client(addr).await?;
-                let client = utils::Client::new(sender, receiver, (service,), None);
+                let client = utils::Client::new(sender, receiver, service, None);
                 Ok(client)
             }
         }
@@ -310,7 +310,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
         });
 
         service_match_arms.push(quote! {
-            #request_ident::#method_request_ident(request) => #response_ident::#method_response_ident(self.0.#method_ident(client, #(request.#arg_names),*).await),
+            #request_ident::#method_request_ident(request) => #response_ident::#method_response_ident(self.#method_ident(client, #(request.#arg_names),*).await),
         });
     }
 
@@ -321,7 +321,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
     };
 
     let impl_service = quote! {
-        impl<T> utils::Service<#dummy_ident> for (T,)
+        impl<T> utils::Service<#dummy_ident> for T
         where T: #ident + Send + Sync {
             type Request = #request_ident;
             type Response = #response_ident;
