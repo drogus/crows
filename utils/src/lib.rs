@@ -213,7 +213,7 @@ impl Client {
         close_receiver: Option<oneshot::Receiver<()>>,
     ) -> <T as Service<DummyType>>::Client
     where
-        T: Service<DummyType> + Send + Sync + 'static,
+        T: Service<DummyType> + Send + Sync + 'static + Clone,
         <T as Service<DummyType>>::Request: Send,
         <T as Service<DummyType>>::Response: Send,
         <T as Service<DummyType>>::Client: ClientTrait + Clone + Send + Sync + 'static,
@@ -239,26 +239,21 @@ impl Client {
                                         break;
                                     }
                                 } else {
-                                    // TODO: at the moment we block a service while executing a
-                                    // single request. this is because we allow to use &mut self
-                                    // in services and thus with the current implementation it
-                                    // would be hard to share the service object. It would be better to
-                                    // change it to always be &self and control the interior
-                                    // mutability with a lock. we could still allow for &mut
-                                    // methods, but only &mut methods would block. Another option
-                                    // would be to always use &self and thus require the
-                                    // implementation to deal with locking for each attribute that
-                                    // needs it
-                                    let deserialized = serde_json::from_str::<<T as Service<DummyType>>::Request>(&message.message).unwrap();
-                                    let response = service.handle_request(client_clone.clone(), deserialized).await;
+                                    let service_clone = service.clone();
+                                    let sender_clone = sender.clone();
+                                    let client_clone = client_clone.clone();
+                                    tokio::spawn(async move {
+                                        let deserialized = serde_json::from_str::<<T as Service<DummyType>>::Request>(&message.message).unwrap();
+                                        let response = service_clone.handle_request(client_clone, deserialized).await;
 
-                                    let message = Message {
-                                        id: Uuid::new_v4(),
-                                        reply_to: Some(message.id),
-                                        message: serde_json::to_string(&response).unwrap(),
-                                        message_type: std::any::type_name::<T>().to_string(),
-                                    };
-                                    sender.send(message).unwrap();
+                                        let message = Message {
+                                            id: Uuid::new_v4(),
+                                            reply_to: Some(message.id),
+                                            message: serde_json::to_string(&response).unwrap(),
+                                            message_type: std::any::type_name::<T>().to_string(),
+                                        };
+                                        sender_clone.send(message).unwrap();
+                                    });
                                 }
                             },
                             None => break,
@@ -377,7 +372,7 @@ pub trait Service<DummyType>: Send + Sync {
     type Client: ClientTrait + Clone + Send + Sync;
 
     fn handle_request(
-        &mut self,
+        &self,
         client: Self::Client,
         message: Self::Request,
     ) -> Pin<Box<dyn Future<Output = Self::Response> + Send + '_>>;

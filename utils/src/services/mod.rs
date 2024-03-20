@@ -50,7 +50,7 @@ impl Into<Uuid> for RunId {
 // all the trait definitions wouldn't have to be here
 #[service(variant = "server", other_side = Worker)]
 pub trait WorkerToCoordinator {
-    async fn ping(&mut self) -> String;
+    async fn ping(&self) -> String;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -75,7 +75,7 @@ pub struct WorkerData {
 
 #[service(variant = "client", other_side = WorkerToCoordinator)]
 pub trait Worker {
-    async fn upload_scenario(&mut self, name: String, content: Vec<u8>);
+    async fn upload_scenario(&self, name: String, content: Vec<u8>);
     async fn ping(&self) -> String;
     async fn start(&self, name: String, config: crows_shared::Config) -> Result<(), WorkerError>;
     async fn get_data(&self) -> WorkerData;

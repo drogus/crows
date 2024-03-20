@@ -47,7 +47,7 @@ struct WorkerService {
 }
 
 impl Worker for WorkerService {
-    async fn upload_scenario(&mut self, _: WorkerToCoordinatorClient, name: String, content: Vec<u8>) {
+    async fn upload_scenario(&self, _: WorkerToCoordinatorClient, name: String, content: Vec<u8>) {
         self.scenarios.write().await.insert(name, content);
     }
 
@@ -103,7 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("Connecting to {coordinator_address}");
-    let mut client = connect_to_worker_to_coordinator(coordinator_address, service)
+    let client = connect_to_worker_to_coordinator(coordinator_address, service)
         .await
         .unwrap();
 

@@ -31,7 +31,7 @@ struct WorkerEntry {
 }
 
 impl WorkerToCoordinator for WorkerToCoordinatorService {
-    async fn ping(&mut self, _: WorkerClient) -> String {
+    async fn ping(&self, _: WorkerClient) -> String {
         "OK".into()
     }
 }

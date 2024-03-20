@@ -198,7 +198,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
 
             impl #server_ident {
                 pub async fn accept<T>(&self, service: T) -> Option<<T as utils::Service<#dummy_ident>>::Client>
-                where T: utils::Service<#dummy_ident> + 'static {
+                where T: utils::Service<#dummy_ident> + Clone + 'static {
                     let (sender, receiver, close_receiver) = self.server.accept().await?;
                     let client = utils::Client::new(sender, receiver, service, Some(close_receiver));
                     Some(client)
@@ -222,7 +222,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
                 -> Result<<T as utils::Service<#dummy_ident>>::Client, std::io::Error>
                 where
                     A: utils::tokio::net::ToSocketAddrs,
-                    T: utils::Service<#dummy_ident> + 'static,
+                    T: utils::Service<#dummy_ident> + Clone + 'static,
             {
                 let (sender, mut receiver) = utils::create_client(addr).await?;
                 let client = utils::Client::new(sender, receiver, service, None);
@@ -234,11 +234,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
     let mut trait_methods = Vec::new();
 
     for method in input.methods {
-        let receiver = if method.receiver_mutability.is_some() {
-            quote! { &mut self }
-        } else {
-            quote! { &self }
-        };
+        let receiver = quote! { &self };
 
         let pascal = method.ident.to_string().to_case(Case::Pascal);
         let method_ident = method.ident.clone();
@@ -328,7 +324,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             type Client = #other_side_client_ident;
 
             fn handle_request(
-                &mut self,
+                &self,
                 client: Self::Client,
                 message: Self::Request,
             ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Self::Response> + Send + '_>> {
@@ -383,7 +379,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
         }
 
         impl #client_ident {
-            pub async fn wait(&mut self) {
+            pub async fn wait(&self) {
                 self.client.wait().await;
             }
 
