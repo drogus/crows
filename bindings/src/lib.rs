@@ -1,10 +1,10 @@
 use std::{cell::RefCell, collections::HashMap};
 
 pub use crows_macros::config;
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
-use serde_json::{to_vec, from_slice};
 pub use crows_shared::Config as ExecutorConfig;
 pub use crows_shared::ConstantArrivalRateConfig;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::{from_slice, to_vec};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 pub enum HTTPMethod {

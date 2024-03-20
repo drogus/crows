@@ -19,6 +19,11 @@ fn config() -> ExecutorConfig {
 
 #[export_name = "test"]
 pub fn test() {
-    let response = http_request("http://127.0.0.1:8080/".into(), GET, HashMap::new(), "".into());
+    let response = http_request(
+        "http://127.0.0.1:8080/".into(),
+        GET,
+        HashMap::new(),
+        "".into(),
+    );
     // println!("response: {:?}", response.unwrap().status);
 }

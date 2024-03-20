@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 pub trait ExecutorConfig {
     fn split(&self, times: usize) -> Config;
@@ -14,7 +14,7 @@ pub enum Config {
 impl Config {
     pub fn split(&self, times: usize) -> Config {
         match self {
-            Config::ConstantArrivalRate(config) => config.split(times)
+            Config::ConstantArrivalRate(config) => config.split(times),
         }
     }
 }
