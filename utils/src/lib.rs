@@ -310,6 +310,67 @@ pub trait ClientTrait {
     fn new(client: Client) -> Self;
 }
 
+/// The DummyType here is needed, because in the `service` macro we implement
+/// service on a generic type. This, in turn, is needed because I wanted to
+/// allow for a service definition after specifying the impl.
+/// For example we define a Worker RPC service in a shared crate/file. In there
+/// we want to only define the interface, but in order for the service to work properly
+/// the Service trait has to be also implemented. It's best to do it in the macro
+/// itself, cause it requires a lot of boilerplate, but when the macro runs, we don't
+/// have the actual service defined yet.
+///
+/// So if we could define all of it in one file it would be something like:
+///
+///     trait Worker {
+///         async fn ping(&self) -> String;
+///     }
+///
+///     struct WorkerService {}
+///
+///     impl Worker for WorkerService {
+///         async fn ping(&self) -> String { todo!() }
+///     }
+///
+///     impl Service for WorkrService {
+///         type Request = WorkerRequest;
+///         type Response = WorkerResponse;
+///
+///         fn handle_request(...) { .... }
+///     }
+///
+/// The problem is, we don't want to require implementation of the service to live
+/// in the same place where the definition lives. That's why it's better to only
+/// implement Service for a generic type and thus allow for it to be applied
+/// only when the type is actually created, for example:
+///
+///     impl<T> Service for T
+///     where T: Worker + Send + Sync { }
+///
+/// The issue here is that this results in a "conflicting implementation" error if
+/// there is more than one `impl` of this type present. The reason is future proofing.
+/// For example consider the previous impl and another one for another service
+///
+///     impl<T> Service for T
+///     where T: Coordinator + Send + Sync { }
+///
+/// While we know that we don't want to implement both `Coordinator` and `Worker`
+/// traits on the same type, Rust doesn't. The solution is to add a "dummy type"
+/// to the service implementation and thus narrow down the impl to a specific generic
+/// type, for example:
+///
+///     struct DummyWorkerService {}
+///
+///     impl<T> Service<DummyWorkerService> for T
+///     where T: Worker + Send + Sync { }
+///
+/// Now the impl is only considered for a specific Service type and the only
+/// additional requirement is that now we have to include the dummy type when
+/// specifycing the service, for example if we accept the Worker service as an
+/// argument we say:
+///
+///     fn foo<T>(service: T)
+///         where T: Service<DummyWorkerService> { }
+///
 pub trait Service<DummyType>: Send + Sync {
     type Response: Send + Serialize;
     type Request: DeserializeOwned + Send;
