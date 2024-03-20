@@ -13,6 +13,8 @@ use crows_utils::services::{
 };
 use num_rational::Rational64;
 
+mod executors;
+
 type ScenariosList = Arc<RwLock<HashMap<String, Vec<u8>>>>;
 
 // TODO: in the future we should probably share it with the coordinator, ie.
@@ -115,90 +117,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // TODO: pinging should also work as an indicator of connection being alive
         client.ping().await?;
         sleep(Duration::from_secs(1)).await;
-    }
-}
-
-trait Executor {
-    async fn prepare(&mut self) -> anyhow::Result<()>;
-    async fn run(&mut self) -> anyhow::Result<()>;
-}
-
-enum Executors {
-    ConstantArrivalRateExecutor(ConstantArrivalRateExecutor),
-}
-
-impl Executors {
-    pub async fn create_executor(config: Config, runtime: Runtime) -> Self {
-        match config {
-            Config::ConstantArrivalRate(config) => {
-                Executors::ConstantArrivalRateExecutor(ConstantArrivalRateExecutor {
-                    config,
-                    runtime,
-                })
-            }
-        }
-    }
-
-    pub async fn run(&mut self) {
-        match self {
-            Executors::ConstantArrivalRateExecutor(ref mut executor) => {
-                executor.run().await.unwrap()
-            }
-        }
-    }
-
-    pub async fn prepare(&mut self) {
-        match self {
-            Executors::ConstantArrivalRateExecutor(ref mut executor) => {
-                executor.prepare().await.unwrap()
-            }
-        }
-    }
-}
-
-struct ConstantArrivalRateExecutor {
-    config: ConstantArrivalRateConfig,
-    runtime: Runtime,
-}
-
-// TODO: k6 supports an option to set maximum number of VUs. For now
-// I haven't bothered to implement any limits, but it might be useful for bigger
-// tests maybe?
-impl Executor for ConstantArrivalRateExecutor {
-    async fn run(&mut self) -> anyhow::Result<()> {
-        let rate_per_second = self.config.rate as f64 / self.config.time_unit.as_secs_f64();
-        let sleep_duration = Duration::from_secs_f64(1.0 / rate_per_second);
-
-        let instant = Instant::now();
-        loop {
-            let handle = self.runtime.fetch_or_create_instance().await?;
-            tokio::spawn(async move {
-                if let Err(err) = handle.run_test().await {
-                    eprintln!("An error occurred while running a scenario: {err:?}");
-                }
-            });
-            // TODO: at the moment we always sleep for a calculated amount of time
-            // This may be wrong, especially when duration is very low, because
-            // with a very high request rate the time needed to spawn a task may
-            // be substantial enough to delay execution. So technically we should
-            // calculate how much time passed since sending the previous request and
-            // only sleep for the remaining duration
-            tokio::time::sleep(sleep_duration).await;
-
-            // TODO: wait for all of the allocated instances finish, ie. implement
-            // "graceful stop"
-            if instant.elapsed() > self.config.duration {
-                return Ok(());
-            }
-        }
-    }
-
-    async fn prepare(&mut self) -> anyhow::Result<()> {
-        let vus = self.config.allocated_vus;
-        for _ in 0..vus {
-            self.runtime.reserve_instance().await?;
-        }
-
-        Ok(())
     }
 }
