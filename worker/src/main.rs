@@ -1,51 +1,27 @@
-use crows_shared::{Config, ConstantArrivalRateConfig};
-use crows_wasm::Runtime;
+use crows_wasm::{InfoHandle, Runtime, InfoMessage};
+use executors::Executors;
 use std::sync::Arc;
-use std::time::Instant;
 use std::{collections::HashMap, time::Duration};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
 use tokio::time::sleep;
 use uuid::Uuid;
 
 use crows_utils::services::{
     connect_to_worker_to_coordinator, RunId, Worker, WorkerData, WorkerError,
-    WorkerToCoordinatorClient,
+    WorkerToCoordinatorClient, RunInfo,
 };
-use num_rational::Rational64;
 
 mod executors;
 
 type ScenariosList = Arc<RwLock<HashMap<String, Vec<u8>>>>;
-
-// TODO: in the future we should probably share it with the coordinator, ie.
-// coordinator should prepare the defaults based on the default module settings
-// by examining the module
-#[derive(Clone)]
-struct RunInfo {
-    run_id: RunId,
-    concurrency: usize,
-    rate: Rational64,
-    module_name: String,
-}
-
-impl RunInfo {
-    fn new(run_id: RunId, concurrency: usize, rate: Rational64, module_name: String) -> Self {
-        Self {
-            run_id,
-            concurrency,
-            rate,
-            module_name,
-        }
-    }
-}
+type RunsList = Arc<RwLock<HashMap<RunId, InfoHandle>>>;
 
 #[derive(Clone)]
 struct WorkerService {
     scenarios: ScenariosList,
     hostname: String,
-    runs: HashMap<RunId, RunInfo>,
+    runs: RunsList,
     environment: crows_wasm::Environment,
-    client: Arc<Mutex<Option<WorkerToCoordinatorClient>>>,
 }
 
 impl Worker for WorkerService {
@@ -57,7 +33,13 @@ impl Worker for WorkerService {
         todo!()
     }
 
-    async fn start(&self, _: WorkerToCoordinatorClient, name: String, config: crows_shared::Config) -> Result<(), WorkerError> {
+    async fn start(
+        &self,
+        _: WorkerToCoordinatorClient,
+        name: String,
+        config: crows_shared::Config,
+        id: RunId,
+    ) -> Result<(), WorkerError> {
         let locked = self.scenarios.read().await;
         let scenario = locked
             .get(&name)
@@ -65,13 +47,19 @@ impl Worker for WorkerService {
             .clone();
         drop(locked);
 
-        let runtime = Runtime::new(&scenario)
+        let (runtime, info_handle) = Runtime::new(&scenario)
             .map_err(|err| WorkerError::CouldNotCreateRuntime(err.to_string()))?;
+
         let mut executor = Executors::create_executor(config, runtime).await;
-        // TODO: prepare should be an entirely separate step and coordinator should wait for
-        // prepare from all of the workers
-        executor.prepare().await;
-        executor.run().await;
+
+        tokio::spawn(async move {
+            // TODO: prepare should be an entirely separate step and coordinator should wait for
+            // prepare from all of the workers
+            executor.prepare().await;
+            executor.run().await;
+        });
+
+        self.runs.write().await.insert(id, info_handle);
 
         Ok(())
     }
@@ -81,6 +69,32 @@ impl Worker for WorkerService {
             id: Uuid::new_v4(),
             hostname: self.hostname.clone(),
         }
+    }
+
+    async fn get_run_status(&self, _: WorkerToCoordinatorClient, id: RunId) -> RunInfo {
+        let mut run_info: RunInfo = Default::default();
+        run_info.done = false;
+
+        if let Some(handle) = self.runs.write().await.get_mut(&id) {
+            while let Ok(update) = handle.receiver.try_recv() {
+                match update {
+                    InfoMessage::Stderr(buf) => run_info.stderr.push(buf),
+                    InfoMessage::Stdout(buf) => run_info.stdout.push(buf),
+                    InfoMessage::RequestInfo(info) => run_info.request_stats.push(info),
+                    InfoMessage::IterationInfo(info) => run_info.iteration_stats.push(info),
+                    InfoMessage::InstanceCheckedOut => run_info.active_instances_delta += 1,
+                    InfoMessage::InstanceReserved => run_info.capacity_delta += 1,
+                    InfoMessage::InstanceCheckedIn => run_info.active_instances_delta -= 1,
+                    InfoMessage::TimingUpdate((elapsed, left)) => {
+                        run_info.elapsed = Some(elapsed);
+                        run_info.left = Some(left);
+                    },
+                    crows_wasm::InfoMessage::Done => run_info.done = true,
+                }
+            }
+        }
+
+        run_info
     }
 }
 
@@ -94,24 +108,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let handles: Vec<RuntimeHandle> = Default::default();
     let scenarios: ScenariosList = Default::default();
 
-    let wrapped_client: Arc<Mutex<Option<WorkerToCoordinatorClient>>> = Default::default();
-
     let service = WorkerService {
         scenarios: scenarios.clone(),
         hostname,
         runs: Default::default(),
         environment: crows_wasm::Environment::new().unwrap(),
-        client: wrapped_client.clone(),
     };
 
     println!("Connecting to {coordinator_address}");
     let client = connect_to_worker_to_coordinator(coordinator_address, service)
         .await
         .unwrap();
-
-    let mut locked = wrapped_client.lock().await;
-    *locked = Some(client.clone());
-    drop(locked);
 
     loop {
         // TODO: pinging should also work as an indicator of connection being alive

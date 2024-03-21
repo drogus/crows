@@ -1,3 +1,5 @@
+use std::{collections::HashMap, time::Duration};
+
 use crate::{self as utils};
 use crows_service::service;
 use serde::{Deserialize, Serialize};
@@ -62,9 +64,12 @@ pub enum WorkerStatus {
 #[service(variant = "server", other_side = Client)]
 pub trait Coordinator {
     async fn upload_scenario(name: String, content: Vec<u8>) -> Result<(), CoordinatorError>;
-    async fn start(name: String, workers_number: usize) -> Result<(), CoordinatorError>;
+    async fn start(
+        name: String,
+        workers_number: usize,
+    ) -> Result<(RunId, Vec<String>), CoordinatorError>;
     async fn list_workers() -> Vec<String>;
-    async fn update_status(&self, status: WorkerStatus, id: Uuid);
+    async fn get_run_status(&self, id: RunId) -> Option<HashMap<String, RunInfo>>;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -73,12 +78,42 @@ pub struct WorkerData {
     pub hostname: String,
 }
 
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct RequestInfo {
+    pub latency: Duration,
+    pub successful: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct IterationInfo {
+    pub latency: Duration,
+}
+
+#[derive(Default, Clone, Serialize, Deserialize, Debug)]
+pub struct RunInfo {
+    pub iteration_stats: Vec<IterationInfo>,
+    pub request_stats: Vec<RequestInfo>,
+    pub stderr: Vec<Vec<u8>>,
+    pub stdout: Vec<Vec<u8>>,
+    pub done: bool,
+    pub elapsed: Option<Duration>,
+    pub left: Option<Duration>,
+    pub active_instances_delta: isize,
+    pub capacity_delta: isize,
+}
+
 #[service(variant = "client", other_side = WorkerToCoordinator)]
 pub trait Worker {
     async fn upload_scenario(&self, name: String, content: Vec<u8>);
     async fn ping(&self) -> String;
-    async fn start(&self, name: String, config: crows_shared::Config) -> Result<(), WorkerError>;
+    async fn start(
+        &self,
+        name: String,
+        config: crows_shared::Config,
+        run_id: RunId,
+    ) -> Result<(), WorkerError>;
     async fn get_data(&self) -> WorkerData;
+    async fn get_run_status(&self, id: RunId) -> RunInfo;
 }
 
 #[service(variant = "client", other_side = Coordinator)]

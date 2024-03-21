@@ -1,10 +1,13 @@
+use std::path::PathBuf;
+
 use crows_utils::services::connect_to_coordinator;
 use crows_utils::services::Client;
 
-use std::path::PathBuf;
-
 use clap::{Parser, Subcommand};
 
+mod commands;
+
+#[derive(Clone)]
 struct ClientService;
 
 impl Client for ClientService {}
@@ -44,7 +47,7 @@ enum WorkersCommands {
 }
 
 #[tokio::main]
-pub async fn main() {
+pub async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let service = ClientService {};
     let coordinator = connect_to_coordinator("127.0.0.1:8282", service)
@@ -64,10 +67,7 @@ pub async fn main() {
             name,
             workers_number,
         }) => {
-            coordinator
-                .start(name.to_string(), workers_number.clone())
-                .await
-                .unwrap();
+            commands::start(&coordinator, name, workers_number).await?;
         }
         Some(Commands::Workers { command }) => match &command {
             Some(WorkersCommands::List) => {
@@ -85,4 +85,6 @@ pub async fn main() {
         },
         None => {}
     }
+
+    Ok(())
 }

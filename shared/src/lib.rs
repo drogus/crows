@@ -32,6 +32,15 @@ impl ExecutorConfig for ConstantArrivalRateConfig {
         let mut new_config = self.clone();
 
         new_config.rate /= times;
+        // if someone uses low rate and a lot of workers we could end up
+        // with rate equal to zero
+        // TODO: should we worn that it's maybe not what someone wanted?
+        // rate of 1 per worker may make sense if someone is just trying to test
+        // requests from a lot of different locations, but if there is more workers
+        // than the value of rate it feels like a mistake not a deliberate thing
+        if new_config.rate == 0 {
+            new_config.rate = 1;
+        }
 
         Config::ConstantArrivalRate(new_config)
     }

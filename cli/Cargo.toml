@@ -9,6 +9,7 @@ edition = "2021"
 crows-utils = { path = "../utils" }
 crows-service = { path = "../service" }
 clap = { version = "4.4.5", features = ["derive"] }
+crossterm = "0.27"
 
 tokio.workspace = true
 serde_json.workspace = true
@@ -17,3 +18,4 @@ futures.workspace = true
 tokio-util.workspace = true
 serde.workspace = true
 uuid.workspace = true
+anyhow.workspace = true
