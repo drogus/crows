@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use futures::prelude::*;
 use futures::TryStreamExt;
+use services::{RunInfo, RequestInfo, IterationInfo};
 use std::future::Future;
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio::sync::RwLock;
@@ -376,4 +378,50 @@ pub trait Service<DummyType>: Send + Sync {
         client: Self::Client,
         message: Self::Request,
     ) -> Pin<Box<dyn Future<Output = Self::Response> + Send + '_>>;
+}
+
+pub async fn process_info_handle(handle: &mut InfoHandle) -> RunInfo {
+    let mut run_info: RunInfo = Default::default();
+    run_info.done = false;
+
+    while let Ok(update) = handle.receiver.try_recv() {
+        match update {
+            InfoMessage::Stderr(buf) => run_info.stderr.push(buf),
+            InfoMessage::Stdout(buf) => run_info.stdout.push(buf),
+            InfoMessage::RequestInfo(info) => run_info.request_stats.push(info),
+            InfoMessage::IterationInfo(info) => run_info.iteration_stats.push(info),
+            InfoMessage::InstanceCheckedOut => run_info.active_instances_delta += 1,
+            InfoMessage::InstanceReserved => run_info.capacity_delta += 1,
+            InfoMessage::InstanceCheckedIn => run_info.active_instances_delta -= 1,
+            InfoMessage::TimingUpdate((elapsed, left)) => {
+                run_info.elapsed = Some(elapsed);
+                run_info.left = Some(left);
+            }
+            InfoMessage::Done => run_info.done = true,
+        }
+    }
+
+    run_info
+}
+
+// TODO: I don't like that name, I think it should be changed
+pub enum InfoMessage {
+    Stderr(Vec<u8>),
+    Stdout(Vec<u8>),
+    RequestInfo(RequestInfo),
+    IterationInfo(IterationInfo),
+    // TODO: I'm not sure if shoving any kind of update here is a good idea,
+    // but at the moment it's the easiest way to pass data back to the client,
+    // so I'm going with it. I'd like to revisit it in the future, though and
+    // consider alternatives
+    InstanceCheckedOut,
+    InstanceReserved,
+    InstanceCheckedIn,
+    // elapsed, left
+    TimingUpdate((Duration, Duration)),
+    Done,
+}
+
+pub struct InfoHandle {
+    pub receiver: UnboundedReceiver<InfoMessage>,
 }

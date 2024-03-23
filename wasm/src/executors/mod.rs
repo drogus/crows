@@ -1,10 +1,12 @@
 mod constant_arrival_rate;
 use constant_arrival_rate::ConstantArrivalRateExecutor;
 use crows_shared::Config;
-use crows_wasm::Runtime;
+use crate::Runtime;
 
 pub trait Executor {
+    #[allow(async_fn_in_trait)]
     async fn prepare(&mut self) -> anyhow::Result<()>;
+    #[allow(async_fn_in_trait)]
     async fn run(&mut self) -> anyhow::Result<()>;
 }
 

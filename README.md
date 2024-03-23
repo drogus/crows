@@ -4,6 +4,32 @@
 
 Crows is a distributed load and stress testing runner. The tests can be written in any language that can compile to WASM given the bindings for the library are available. At the moment the bindings are available only for Rust, but once the ABIs are stable it should be relatively straightforward to add more languages.
 
+### Showcase
+
+A sample scenario written in Rust looks like this:
+
+```
+#[config]
+fn config() -> ExecutorConfig {
+    let config = ConstantArrivalRateConfig {
+        duration: Duration::from_secs(5),
+        rate: 10,
+        allocated_vus: 10,
+        ..Default::default()
+    };
+    ExecutorConfig::ConstantArrivalRate(config)
+}
+
+#[export_name = "scenario"]
+pub fn scenario() {
+    http_request(
+        "https://google.com".into(), GET, HashMap::new(), "".into(),
+    );
+}
+```
+
+It will send 10 requests per second to google.com. For information on how to compile and run it please go to the [Usage section](#usage)
+
 ### State of the project
 
 This project is at a "working proof of concept" stage. It has solid foundation as I put a lot of thought into figuring out the best way to implement it, but there are a lot of details that are either missing or are knowingly implemented in a not optimal/best way. I've started thinking about the project about 3 years ago and I've started the current iteration about 1.5 years ago and I decided I have to finish it as soon as possible or it will end up where most of my personal projects - aiming for perfection, half finished and never released.
@@ -38,6 +64,10 @@ Crows is not production ready, so it misses some of the features, but my persona
 * plugin system (probably based on WASM) to allow extending the tool without necessarily extending the source
 * a web interface
 * a nice TUI (Terminal UI)
+
+### Installing
+
+...
   
 ### Usage
 
@@ -153,6 +183,7 @@ I don't have a very precise plan on where I want Crows to go, but some loose tho
 8. For simplicity I use Reqwest HTTP library on the host, which has an internal pool of clients. I haven't given it too much thought yet, but I think that I would prefer to have a greater control over how HTTP connections are handled. For example I think it makes most sense if a scenario uses dedicated connections and is generally not reused between scenarios. It could be nice to allow sharing a connection between scenarios for performance, which is something for example `wrk` does by default between requests, but it should be configurable and in general we should have more granular control on how it works
 9. Look closer into serialization formats, both for the communication between components and communication between WASM modules and the host. I would ideally want something with ability do define a schema and make backwards compatible changes to the schema.
 10. More performant memory management. For example at the moment sending an HTTP request means serializing the entire request in the WASM module and then deserializing it on the host side. If a stress test requires sending big files it's generally a waste of CPU cycles as we could quite easily serialize only the headers and url, write body to the WASM memory directly and then send the body straight from the memory rather than copy it anywhere. Another example is that most of the time RPC services and clients could use references.
+11. At the moment there is only one stage possible to be executed - running the scenario itself. I want to also add some kind of a "prepare" step which would run before the scenario itself and which would prepare the data, but I need to think a bit more on how exactly it should work.
 
 ### License
 

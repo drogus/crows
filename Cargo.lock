@@ -607,6 +607,7 @@ dependencies = [
  "crossterm",
  "crows-service",
  "crows-utils",
+ "crows-wasm",
  "futures 0.3.28",
  "serde",
  "serde_json",

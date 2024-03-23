@@ -1,6 +1,7 @@
 use anyhow::anyhow;
 use crows_bindings::{HTTPError, HTTPMethod, HTTPRequest, HTTPResponse};
-use crows_utils::services::{RunId, RequestInfo, IterationInfo};
+use crows_utils::{InfoHandle, InfoMessage};
+use crows_utils::services::{IterationInfo, RequestInfo, RunId};
 use futures::Future;
 use reqwest::header::{HeaderName, HeaderValue};
 use reqwest::{Body, Request, Url};
@@ -21,6 +22,11 @@ use wasi_common::file::{FdFlags, FileType};
 use wasi_common::WasiFile;
 use wasmtime::{Caller, Engine, Linker, Memory, MemoryType, Module, Store};
 use wasmtime_wasi::{StdoutStream, StreamResult};
+
+pub mod executors;
+
+use crows_shared::Config;
+use executors::Executors;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -55,7 +61,12 @@ impl InstanceHandle {
         inner.sender.send(RuntimeMessage::RunTest(sender))?;
         receiver.await?;
         let latency = instant.elapsed();
-        inner.runtime.write().await.info_sender.send(InfoMessage::IterationInfo(IterationInfo { latency }))?;
+        inner
+            .runtime
+            .write()
+            .await
+            .info_sender
+            .send(InfoMessage::IterationInfo(IterationInfo { latency }))?;
         Ok(())
     }
 }
@@ -80,9 +91,11 @@ impl Drop for InstanceHandle {
         if let Some(inner) = self.inner.take() {
             tokio::spawn(async move {
                 let mut runtime = inner.runtime.write().await;
-                runtime.checkin_instance(InstanceHandle {
-                    inner: Some(inner.clone()),
-                }).await;
+                runtime
+                    .checkin_instance(InstanceHandle {
+                        inner: Some(inner.clone()),
+                    })
+                    .await;
             });
         }
     }
@@ -104,21 +117,30 @@ impl Runtime {
     pub fn new(content: &Vec<u8>) -> anyhow::Result<(Self, InfoHandle)> {
         let environment = Environment::new()?;
         let module = Module::from_binary(&environment.engine, content)?;
-        
+
         let (info_sender, info_receiver) = unbounded_channel();
 
-        let info_handle = InfoHandle { receiver: info_receiver };
+        let info_handle = InfoHandle {
+            receiver: info_receiver,
+        };
 
-        Ok((Self {
-            module,
-            environment,
-            inner: Arc::new(RwLock::new(RuntimeInner {
-                instances: VecDeque::new(),
-                info_sender: info_sender.clone(),
-            })),
-            info_sender,
-            length: 0,
-        }, info_handle))
+        Ok((
+            Self {
+                module,
+                environment,
+                inner: Arc::new(RwLock::new(RuntimeInner {
+                    instances: VecDeque::new(),
+                    info_sender: info_sender.clone(),
+                })),
+                info_sender,
+                length: 0,
+            },
+            info_handle,
+        ))
+    }
+
+    pub async fn new_instance(&self) -> anyhow::Result<(Instance, InfoHandle, Store<WasiHostCtx>)> {
+        Instance::new(&self.environment, &self.module).await
     }
 
     pub async fn reserve_instance(&mut self) -> anyhow::Result<()> {
@@ -129,7 +151,8 @@ impl Runtime {
         };
         let handle = InstanceHandle { inner: Some(inner) };
 
-        let (instance, mut info_handle, store) = Instance::new(&self.environment, &self.module).await?;
+        let (instance, mut info_handle, store) =
+            Instance::new(&self.environment, &self.module).await?;
 
         let info_sender = self.info_sender.clone();
         tokio::spawn(async move {
@@ -171,7 +194,11 @@ impl Runtime {
     }
 
     pub async fn checkin_instance(&self, instance_handle: InstanceHandle) {
-        self.inner.write().await.checkin_instance(instance_handle).await;
+        self.inner
+            .write()
+            .await
+            .checkin_instance(instance_handle)
+            .await;
     }
 
     pub async fn checkout_or_create_instance(&mut self) -> anyhow::Result<InstanceHandle> {
@@ -203,7 +230,7 @@ pub struct WasiHostCtx {
     memory: Option<Memory>,
     buffers: slab::Slab<Box<[u8]>>,
     client: reqwest::Client,
-    request_info_sender: UnboundedSender<RequestInfo>
+    request_info_sender: UnboundedSender<RequestInfo>,
 }
 
 fn create_return_value(status: u8, length: u32, ptr: u32) -> u64 {
@@ -440,33 +467,14 @@ pub fn get_memory<T>(caller: &mut Caller<'_, T>) -> anyhow::Result<Memory> {
     Ok(caller.get_export("memory").unwrap().into_memory().unwrap())
 }
 
-// TODO: I don't like that name, I think it should be changed
-pub enum InfoMessage {
-    Stderr(Vec<u8>),
-    Stdout(Vec<u8>),
-    RequestInfo(RequestInfo),
-    IterationInfo(IterationInfo),
-    // TODO: I'm not sure if shoving any kind of update here is a good idea,
-    // but at the moment it's the easiest way to pass data back to the client,
-    // so I'm going with it. I'd like to revisit it in the future, though and
-    // consider alternatives
-    InstanceCheckedOut,
-    InstanceReserved,
-    InstanceCheckedIn,
-    // elapsed, left
-    TimingUpdate((Duration, Duration)),
-    Done,
-}
-
-pub struct InfoHandle {
-    pub receiver: UnboundedReceiver<InfoMessage>
-}
-
 impl Instance {
-    pub fn new_store(engine: &Engine) -> anyhow::Result<(wasmtime::Store<WasiHostCtx>, InfoHandle)> {
+    pub fn new_store(
+        engine: &Engine,
+    ) -> anyhow::Result<(wasmtime::Store<WasiHostCtx>, InfoHandle)> {
         let (stdout_sender, mut stdout_receiver) = tokio::sync::mpsc::unbounded_channel();
         let (stderr_sender, mut stderr_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let (request_info_sender, mut request_info_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (request_info_sender, mut request_info_receiver) =
+            tokio::sync::mpsc::unbounded_channel();
 
         let (info_sender, info_receiver) = tokio::sync::mpsc::unbounded_channel();
 
@@ -482,7 +490,7 @@ impl Instance {
         });
 
         let info_handle = InfoHandle {
-            receiver: info_receiver
+            receiver: info_receiver,
         };
 
         let stdout = RemoteIo {
@@ -620,3 +628,20 @@ impl StdoutStream for RemoteIo {
 impl wasmtime_wasi::Subscribe for RemoteIo {
     async fn ready(&mut self) {}
 }
+
+pub async fn run_scenario(
+    runtime: Runtime,
+    scenario: Vec<u8>,
+    config: Config,
+) {
+    let mut executor = Executors::create_executor(config, runtime).await;
+
+    tokio::spawn(async move {
+        // TODO: prepare should be an entirely separate step and coordinator should wait for
+        // prepare from all of the workers
+        executor.prepare().await;
+        executor.run().await;
+    });
+}
+
+

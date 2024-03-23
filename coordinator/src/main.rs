@@ -94,7 +94,7 @@ impl Coordinator for CoordinatorService {
 
         let (runtime, _) = crows_wasm::Runtime::new(&scenario)
             .map_err(|err| CoordinatorError::FailedToCreateRuntime(err.to_string()))?;
-        let (instance, _, mut store) = Instance::new(&runtime.environment, &runtime.module)
+        let (instance, _, mut store) = runtime.new_instance()
             .await
             .map_err(|_| CoordinatorError::FailedToCompileModule)?;
         let config = fetch_config(instance, &mut store)

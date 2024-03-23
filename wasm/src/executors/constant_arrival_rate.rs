@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 // but I also don't like the idea of having to depend on the worker in WASM
 // modules
 use crows_shared::ConstantArrivalRateConfig;
-use crows_wasm::{Runtime, InfoMessage};
+use crate::{Runtime, InfoMessage};
 use super::Executor;
 
 pub struct ConstantArrivalRateExecutor {
@@ -41,12 +41,16 @@ impl Executor for ConstantArrivalRateExecutor {
             // TODO: wait for all of the allocated instances finish, ie. implement
             // "graceful stop"
             if instant.elapsed() > self.config.duration {
-                self.runtime.send_update(InfoMessage::Done);
+                if let Err(err) = self.runtime.send_update(InfoMessage::Done) {
+                    eprintln!("Got an error when sending an update: {err:?}");
+                }
                 return Ok(());
             }
 
             if last_time_update.elapsed() > update_duration {
-                self.runtime.send_update(InfoMessage::TimingUpdate((instant.elapsed(), self.config.duration.checked_sub(instant.elapsed()).unwrap())));
+                if let Err(err) = self.runtime.send_update(InfoMessage::TimingUpdate((instant.elapsed(), self.config.duration.checked_sub(instant.elapsed()).unwrap()))) {
+                    eprintln!("Got an error when sending an update: {err:?}");
+                }
                 last_time_update = Instant::now();
             }
         }

@@ -1,5 +1,5 @@
-use crows_wasm::{InfoHandle, Runtime, InfoMessage};
-use executors::Executors;
+use crows_utils::{process_info_handle, InfoHandle};
+use crows_wasm::{run_scenario, Runtime};
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 use tokio::sync::RwLock;
@@ -7,11 +7,9 @@ use tokio::time::sleep;
 use uuid::Uuid;
 
 use crows_utils::services::{
-    connect_to_worker_to_coordinator, RunId, Worker, WorkerData, WorkerError,
-    WorkerToCoordinatorClient, RunInfo,
+    connect_to_worker_to_coordinator, RunId, RunInfo, Worker, WorkerData, WorkerError,
+    WorkerToCoordinatorClient,
 };
-
-mod executors;
 
 type ScenariosList = Arc<RwLock<HashMap<String, Vec<u8>>>>;
 type RunsList = Arc<RwLock<HashMap<RunId, InfoHandle>>>;
@@ -50,14 +48,7 @@ impl Worker for WorkerService {
         let (runtime, info_handle) = Runtime::new(&scenario)
             .map_err(|err| WorkerError::CouldNotCreateRuntime(err.to_string()))?;
 
-        let mut executor = Executors::create_executor(config, runtime).await;
-
-        tokio::spawn(async move {
-            // TODO: prepare should be an entirely separate step and coordinator should wait for
-            // prepare from all of the workers
-            executor.prepare().await;
-            executor.run().await;
-        });
+        run_scenario(runtime, scenario, config).await;
 
         self.runs.write().await.insert(id, info_handle);
 
@@ -72,29 +63,12 @@ impl Worker for WorkerService {
     }
 
     async fn get_run_status(&self, _: WorkerToCoordinatorClient, id: RunId) -> RunInfo {
-        let mut run_info: RunInfo = Default::default();
-        run_info.done = false;
-
         if let Some(handle) = self.runs.write().await.get_mut(&id) {
-            while let Ok(update) = handle.receiver.try_recv() {
-                match update {
-                    InfoMessage::Stderr(buf) => run_info.stderr.push(buf),
-                    InfoMessage::Stdout(buf) => run_info.stdout.push(buf),
-                    InfoMessage::RequestInfo(info) => run_info.request_stats.push(info),
-                    InfoMessage::IterationInfo(info) => run_info.iteration_stats.push(info),
-                    InfoMessage::InstanceCheckedOut => run_info.active_instances_delta += 1,
-                    InfoMessage::InstanceReserved => run_info.capacity_delta += 1,
-                    InfoMessage::InstanceCheckedIn => run_info.active_instances_delta -= 1,
-                    InfoMessage::TimingUpdate((elapsed, left)) => {
-                        run_info.elapsed = Some(elapsed);
-                        run_info.left = Some(left);
-                    },
-                    crows_wasm::InfoMessage::Done => run_info.done = true,
-                }
-            }
+            process_info_handle(handle).await
+        } else {
+            // TODO: this should really be just None
+            Default::default()
         }
-
-        run_info
     }
 }
 

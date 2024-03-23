@@ -4,6 +4,8 @@ use crows_utils::services::connect_to_coordinator;
 use crows_utils::services::Client;
 
 use clap::{Parser, Subcommand};
+use crows_wasm::fetch_config;
+use crows_wasm::run_scenario;
 
 mod commands;
 
@@ -34,6 +36,10 @@ enum Commands {
         #[arg(short, long)]
         workers_number: usize,
     },
+    Run {
+        #[arg()]
+        path: PathBuf,
+    },
     Workers {
         #[command(subcommand)]
         command: Option<WorkersCommands>,
@@ -50,7 +56,7 @@ enum WorkersCommands {
 pub async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let service = ClientService {};
-    let coordinator = connect_to_coordinator("127.0.0.1:8282", service)
+    let mut coordinator = connect_to_coordinator("127.0.0.1:8282", service)
         .await
         .unwrap();
 
@@ -67,7 +73,7 @@ pub async fn main() -> anyhow::Result<()> {
             name,
             workers_number,
         }) => {
-            commands::start(&coordinator, name, workers_number).await?;
+            commands::start(&mut coordinator, name, workers_number).await?;
         }
         Some(Commands::Workers { command }) => match &command {
             Some(WorkersCommands::List) => {
@@ -82,6 +88,9 @@ pub async fn main() -> anyhow::Result<()> {
                 );
             }
             None => {}
+        },
+        Some(Commands::Run { path }) => {
+            commands::run(path).await.expect("An error while running a scenario");
         },
         None => {}
     }
