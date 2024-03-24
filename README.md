@@ -119,14 +119,14 @@ fn config() -> ExecutorConfig {
 
 #[export_name = "scenario"]
 pub fn scenario() {
-    println!("Send request to https://test.k6.io/");
+    println!("Send request to https://google.com/");
     http_request(
-        "https://test.k6.io".to_string(), GET, Default::default(), "".to_string(),
+        "https://google.com".to_string(), GET, Default::default(), "".to_string(),
     );
 }
 ```
 
-I'm hoping K6 maintainers won't be angry about using their test URL. It's a great tool, btw, if you're into stress testing you should check it out!
+This scenario will keep sending 10 requests per second to `https://google.com` for 5 seconds. Just please maybe use another URL if you don't want to get blocked by Google.
 
 Now you can compile the scenario with:
 
