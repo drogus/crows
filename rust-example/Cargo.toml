@@ -9,8 +9,9 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-crows-bindings = { path = "../bindings" }
 rand = "0.8"
+
+crows-bindings.workspace = true
 
 [profile.release]
 lto = true

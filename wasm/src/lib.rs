@@ -457,7 +457,7 @@ impl Environment {
             .func_wrap("crows", "set_config", WasiHostCtx::set_config)
             .unwrap();
 
-        wasmtime_wasi::preview1::add_to_linker_async(&mut linker)?;
+        wasmtime_wasi::preview1::add_to_linker_async(&mut linker, |t| t)?;
 
         Ok(Self { engine, linker })
     }

@@ -12,6 +12,12 @@ members = [
     "shared",
 ]
 
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+# update rust-toolchain.toml too!
+rust-version = "1.76.0"
+
 [workspace.dependencies]
 tokio = { version = "1.20", features = ["full"] }
 anyhow = { version = "1", features = ["backtrace"] }
@@ -23,16 +29,19 @@ serde_json = "1.0"
 serde_with = "3.7"
 futures = "0.3"
 uuid = { version = "1.4", features = ["serde", "v4"] }
-wasmtime = { git = "https://github.com/bytecodealliance/wasmtime.git", features = ["async"] }
-wasmtime-wasi = { git = "https://github.com/bytecodealliance/wasmtime.git" }
-wasi-common = { git = "https://github.com/bytecodealliance/wasmtime.git" }
-wiggle = { git = "https://github.com/bytecodealliance/wasmtime.git" }
+wasmtime = { version = "19.0.0", features = ["async"] }
+wasmtime-wasi = { version = "19.0.0" }
+wasi-common = { version = "19.0.0" }
+wiggle = { version = "19.0.0" }
 num-rational = { version = "0.4", features = ["serde"]}
 bytes = "1.5"
 rational = "1.5"
-crows-macros = { path = "macros" }
-crows-shared = { path = "shared" }
-crows-bindings = { path = "bindings" }
-crows-utils = { path = "utils" }
-crows-service = { path = "service" }
-crows-wasm = { path = "wasm" }
+crows-macros = { path = "macros", version = "0.1.0" }
+crows-shared = { path = "shared", version = "0.1.0" }
+crows-bindings = { path = "bindings", version = "0.1.0" }
+crows-utils = { path = "utils", version = "0.1.0" }
+crows-service = { path = "service", version = "0.1.0" }
+crows-wasm = { path = "wasm", version = "0.1.0" }
+crows-coordinator = { path = "coordinator", version = "0.1.0" }
+crows-worker = { path = "worker", version = "0.1.0" }
+crows-cli = { path = "cli", version = "0.1.0" }
