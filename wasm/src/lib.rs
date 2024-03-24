@@ -231,6 +231,7 @@ pub struct WasiHostCtx {
     buffers: slab::Slab<Box<[u8]>>,
     client: reqwest::Client,
     request_info_sender: UnboundedSender<RequestInfo>,
+    stderr_sender: UnboundedSender<Vec<u8>>,
 }
 
 fn create_return_value(status: u8, length: u32, ptr: u32) -> u64 {
@@ -276,7 +277,7 @@ impl WasiHostCtx {
 
         match result {
             Ok(ret) => {
-                let encoded = to_vec(&ret).unwrap();
+                let encoded = to_vec(&ret)?;
 
                 let length = encoded.len();
                 let index = store.buffers.insert(encoded.into_boxed_slice());
@@ -284,7 +285,7 @@ impl WasiHostCtx {
                 Ok(create_return_value(0, length as u32, index as u32))
             }
             Err(err) => {
-                let encoded = to_vec(&err).unwrap();
+                let encoded = to_vec(&err)?;
 
                 let length = encoded.len();
                 let index = store.buffers.insert(encoded.into_boxed_slice());
@@ -299,6 +300,7 @@ impl WasiHostCtx {
         request: HTTPRequest,
     ) -> Pin<Box<dyn Future<Output = Result<HTTPResponse, HTTPError>> + 'a + Send>> {
         Box::pin(async move {
+            // TODO remove this unwrap
             let memory = get_memory(&mut caller).unwrap();
             let (_, store) = memory.data_and_store_mut(&mut caller);
 
@@ -396,14 +398,19 @@ impl WasiHostCtx {
         let memory = get_memory(&mut caller)?;
         let (slice, store) = memory.data_and_store_mut(&mut caller);
 
-        let buffer = store.buffers.try_remove(index as usize).unwrap();
+        let buffer = store
+            .buffers
+            .try_remove(index as usize)
+            .ok_or(anyhow!("Could not remove slab buffer"))?;
+
         anyhow::ensure!(
             len as usize == buffer.len(),
             "bad length passed to consume_buffer"
         );
+
         slice
             .get_mut((ptr as usize)..((ptr + len) as usize))
-            .unwrap()
+            .ok_or(anyhow!("Could not fetch slice from WASM memory"))?
             .copy_from_slice(&buffer);
 
         Ok(())
@@ -504,7 +511,7 @@ impl Instance {
             sender: stdout_sender,
         };
         let stderr = RemoteIo {
-            sender: stderr_sender,
+            sender: stderr_sender.clone(),
         };
 
         let wasi_ctx = wasmtime_wasi::WasiCtxBuilder::new()
@@ -521,6 +528,7 @@ impl Instance {
             memory: None,
             client: reqwest::Client::new(),
             request_info_sender,
+            stderr_sender,
         };
         let mut store: Store<WasiHostCtx> = Store::new(engine, host_ctx);
 
@@ -555,13 +563,17 @@ pub async fn run_wasm(
         .instance
         .get_typed_func::<(), ()>(&mut store, "scenario")?;
 
-    func.call_async(&mut store, ()).await?;
+    if let Err(err) = func.call_async(&mut store, ()).await {
+        if let Err(e) = store.data().stderr_sender.send(format!("Encountered an error when running a scenario: {err:?}").as_bytes().to_vec()) {
+            eprintln!("Problem when sending logs to worker: {e:?}");
+        }
+    }
 
     Ok(())
 }
 
 pub async fn fetch_config(
-    mut instance: Instance,
+    instance: Instance,
     mut store: &mut Store<WasiHostCtx>,
 ) -> anyhow::Result<crows_shared::Config> {
     let func = instance
