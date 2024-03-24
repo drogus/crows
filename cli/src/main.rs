@@ -1,11 +1,9 @@
 use std::path::PathBuf;
 
 use crows_utils::services::connect_to_coordinator;
-use crows_utils::services::Client;
+use crows_utils::services::{Client, CoordinatorClient};
 
 use clap::{Parser, Subcommand};
-use crows_wasm::fetch_config;
-use crows_wasm::run_scenario;
 
 mod commands;
 
@@ -52,32 +50,34 @@ enum WorkersCommands {
     List,
 }
 
+async fn create_coordinator() -> anyhow::Result<CoordinatorClient> {
+    let url = std::env::var("CROWS_COORDINATOR_URL").unwrap_or("127.0.0.1:8282".to_string());
+    let service = ClientService {};
+    Ok(connect_to_coordinator(url, service).await?)
+}
+
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let service = ClientService {};
-    let mut coordinator = connect_to_coordinator("127.0.0.1:8282", service)
-        .await
-        .unwrap();
 
     match &cli.command {
         Some(Commands::Upload { name, path }) => {
-            let content = std::fs::read(path).unwrap();
-            coordinator
-                .upload_scenario(name.clone(), content)
-                .await
-                .unwrap()
-                .unwrap();
+            let content = std::fs::read(path)?;
+            let coordinator = create_coordinator().await?;
+
+            coordinator.upload_scenario(name.clone(), content).await??;
         }
         Some(Commands::Start {
             name,
             workers_number,
         }) => {
+            let mut coordinator = create_coordinator().await?;
             commands::start(&mut coordinator, name, workers_number).await?;
         }
         Some(Commands::Workers { command }) => match &command {
             Some(WorkersCommands::List) => {
-                let workers = coordinator.list_workers().await.unwrap();
+                let coordinator = create_coordinator().await?;
+                let workers = coordinator.list_workers().await?;
                 println!(
                     "Available workers list:\n{}",
                     workers
@@ -90,8 +90,10 @@ pub async fn main() -> anyhow::Result<()> {
             None => {}
         },
         Some(Commands::Run { path }) => {
-            commands::run(path).await.expect("An error while running a scenario");
-        },
+            commands::run(path)
+                .await
+                .expect("An error while running a scenario");
+        }
         None => {}
     }
 

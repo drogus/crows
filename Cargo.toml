@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 # update rust-toolchain.toml too!
 rust-version = "1.76.0"
@@ -36,12 +36,12 @@ wiggle = { version = "19.0.0" }
 num-rational = { version = "0.4", features = ["serde"]}
 bytes = "1.5"
 rational = "1.5"
-crows-macros = { path = "macros", version = "0.1.0" }
-crows-shared = { path = "shared", version = "0.1.0" }
-crows-bindings = { path = "bindings", version = "0.1.0" }
-crows-utils = { path = "utils", version = "0.1.0" }
-crows-service = { path = "service", version = "0.1.0" }
-crows-wasm = { path = "wasm", version = "0.1.0" }
-crows-coordinator = { path = "coordinator", version = "0.1.0" }
-crows-worker = { path = "worker", version = "0.1.0" }
-crows-cli = { path = "cli", version = "0.1.0" }
+crows-macros = { path = "macros", version = "0.2.0" }
+crows-shared = { path = "shared", version = "0.2.0" }
+crows-bindings = { path = "bindings", version = "0.2.0" }
+crows-utils = { path = "utils", version = "0.2.0" }
+crows-service = { path = "service", version = "0.2.0" }
+crows-wasm = { path = "wasm", version = "0.2.0" }
+crows-coordinator = { path = "coordinator", version = "0.2.0" }
+crows-worker = { path = "worker", version = "0.2.0" }
+crows-cli = { path = "cli", version = "0.2.0" }

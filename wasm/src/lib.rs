@@ -546,7 +546,7 @@ pub async fn run_wasm(
 ) -> anyhow::Result<()> {
     let func = instance
         .instance
-        .get_typed_func::<(), ()>(&mut store, "test")?;
+        .get_typed_func::<(), ()>(&mut store, "scenario")?;
 
     func.call_async(&mut store, ()).await?;
 
