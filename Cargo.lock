@@ -599,7 +599,7 @@ dependencies = [
 
 [[package]]
 name = "crows"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -618,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "crows-bindings"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crows-macros",
  "crows-shared",
@@ -629,7 +629,7 @@ dependencies = [
 
 [[package]]
 name = "crows-coordinator"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crows-service",
  "crows-shared",
@@ -646,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "crows-macros"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "crows-service"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "convert_case",
  "proc-macro2",
@@ -665,7 +665,7 @@ dependencies = [
 
 [[package]]
 name = "crows-shared"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -673,7 +673,7 @@ dependencies = [
 
 [[package]]
 name = "crows-utils"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "byteorder",
@@ -694,7 +694,7 @@ dependencies = [
 
 [[package]]
 name = "crows-wasm"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -717,7 +717,7 @@ dependencies = [
 
 [[package]]
 name = "crows-worker"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "byteorder",
