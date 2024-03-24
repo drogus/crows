@@ -19,11 +19,11 @@ RUN apt-get update \
 
 RUN mkdir -p /app
 
-COPY --from=builder /usr/src/app/target/release/coordinator /app/app
+COPY --from=builder /usr/src/app/target/release/crows-coordinator /app/crows-coordinator
 
 WORKDIR /app
 
 EXPOSE 8181
 EXPOSE 8282
 
-CMD ["/app/app"]
+CMD ["/app/crows-coordinator"]
