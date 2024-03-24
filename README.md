@@ -72,66 +72,100 @@ At the moment you can install the `crows` only through the `cargo` command:
 ```
 cargo install crows
 ```
+ 
+### Usage
 
-And then you can use it to run a scenario:
+#### Local mode
+
+The simplest way to use Crows is to use the local mode. After you obtain the `crows` binary you can run a scenario compiled to WebAssembly with a single command:
 
 ```
 crows run scenario.wasm
 ```
-  
-### Usage
 
-#### Docker
-
-In order to use Crows with docker you can use prebuilt images. First start the coordinator, the main piece that listens for connections from workers and from the client:
+In order to create a scenarios you have to generate a Rust appliction with:
 
 ```
-docker run -p 8282:8282 -p 8181:8181 -t ghcr.io/drogus/crows-coordinator
+cargo new crows-sample
 ```
 
-Then let's start a worker:
+Then you need to set the crate type and add the `crows-bindings` dependency:
 
-```
-docker run --netowrk="host" -t ghcr.io/drogus/crows-worker 127.0.0.1:8181 worker-1
-```
+```toml
+[lib]
+crate-type = ["cdylib"]
 
-Now running a client should give us the workers list:
-
-```
-docker run --netowrk="host" -t ghcr.io/drogus/crows-client workers list
+[dependencies]
+crows-bindings = "0.3"
 ```
 
-The output should show `worker-1` being connected. Now let's connect another worker:
+then add your scenario in `src/lib.rs`:
+
+```rust
+use crows_bindings::{
+    config, http_request, ConstantArrivalRateConfig, ExecutorConfig, HTTPMethod::*,
+};
+use std::time::Duration;
+
+#[config]
+fn config() -> ExecutorConfig {
+    let config = ConstantArrivalRateConfig {
+        duration: Duration::from_secs(5),
+        rate: 10,
+        ..Default::default()
+    };
+    ExecutorConfig::ConstantArrivalRate(config)
+}
+
+#[export_name = "scenario"]
+pub fn scenario() {
+    println!("Send request to https://test.k6.io/");
+    http_request(
+        "https://test.k6.io".to_string(), GET, Default::default(), "".to_string(),
+    );
+}
+```
+
+I'm hoping K6 maintainers won't be angry about using their test URL. It's a great tool, btw, if you're into stress testing you should check it out!
+
+Now you can compile the scenario with:
 
 ```
-docker run --netowrk="host" -t ghcr.io/drogus/crows-worker 127.0.0.1:8181 worker-2
-``````
-
-The workers list should now show two workers. In order to upload a scenario you can use a compiled wasm file in the `example_module` directory. When in the repo you can run the following:
-
-```
-docker run -v $PWD/example_module/hi.wasm:/scenarios/hi.wasm --network="host" --platform linux/amd64 -t ghcr.io/drogus/crows-client upload --name hi --path /scenarios/hi.wasm
+cargo build --release --target wasm32-wasi
 ```
 
-This will upload the `hi.wasm` binary to all of the workers with the name `hi`. Now we can run the module on the workers:
+and run with:
 
 ```
-docker run --network="host" --platform linux/amd64 -t ghcr.io/drogus/crows-client start --name hi --concurrency 10
+crows run target/wasm32-wasi/release/crows_sample.wasm
 ```
 
-This should execute test instances on each of the workers
+#### Distributed mode
 
-#### Running locally
-
-Running locally is possible if you have Rust installed.
-
-Then you can run using cargo, for example:
+In a distributed mode you need to start a coordinator and at least one worker. You interact with the coordinator using the CLI.
 
 ```
-cargo run -p coordinator
-cargo run -p worker -- 127.0.0.1 worker-1
-cargo run -p worker -- 127.0.0.1 worker-2
-cargo run -p cli -- workers list
+cargo install crows-coordinator
+cargo install crows-worker
+```
+
+First you start the coordinator:
+
+```
+crows-coordinator
+```
+
+and then at least one worker:
+
+```
+WORKER_NAME=worker-1 crows-worker
+```
+
+Now you can upload and run a scenario:
+
+```
+crows upload --name test --path scenario.wasm
+crows start --name test --workers-number 1
 ```
 
 ### Architecture
