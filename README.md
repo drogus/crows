@@ -215,7 +215,7 @@ Executors define how scenarios are being executed. They define how and when to a
 
 ### Roadmap/TODO
 
-I don't have a very precise plan on where I want Crows to go, but some loose thoughts on the stuff I'd like to work on if I have time (which is scarce and you can help by supporting me (on GitHub!)[link to gh sponsors]):
+I don't have a very precise plan on where I want Crows to go, but some loose thoughts on the stuff I'd like to work on if I have time:
 
 1. Metrics support as at the moment it's not implemented at all
 2. Support for WebSockets and gRPC. I honestly haven't thought much about these yet and I think it might be problematic, cause WASM doesn't have a good support for threads yet, but maybe callbacks could be an answer?
