@@ -199,7 +199,7 @@ where
 
     let fail_count = latencies.iter().filter(|l| !l.successful()).count();
     let success_count = latencies.iter().filter(|l| l.successful()).count();
-    let fail_rate = fail_count as f64 / latencies.len() as f64;
+    let fail_rate = fail_count as f64 / latencies.len() as f64 * 100f64;
 
     SummaryStats {
         avg: Duration::from_secs_f64(calculate_avg(&latencies_sorted)),

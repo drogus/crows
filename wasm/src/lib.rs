@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use crows_bindings::{HTTPError, HTTPMethod, HTTPRequest, HTTPResponse};
-use crows_utils::{InfoHandle, InfoMessage};
 use crows_utils::services::{IterationInfo, RequestInfo, RunId};
+use crows_utils::{InfoHandle, InfoMessage};
 use futures::Future;
 use reqwest::header::{HeaderName, HeaderValue};
 use reqwest::{Body, Request, Url};
@@ -289,7 +289,7 @@ impl WasiHostCtx {
                 let length = encoded.len();
                 let index = store.buffers.insert(encoded.into_boxed_slice());
 
-                Ok(create_return_value(0, length as u32, index as u32))
+                Ok(create_return_value(1, length as u32, index as u32))
             }
         }
     }
@@ -331,8 +331,15 @@ impl WasiHostCtx {
             *reqw_req.body_mut() = request.body.map(|b| Body::from(b));
 
             let instant = Instant::now();
-            let response = client.execute(reqw_req).await.map_err(|err| HTTPError {
-                message: format!("Error when sending a request: {err:?}"),
+            let response = client.execute(reqw_req).await.map_err(|err| {
+                store.request_info_sender.send(RequestInfo {
+                    latency: instant.elapsed(),
+                    successful: false,
+                });
+
+                HTTPError {
+                    message: format!("Error when sending a request: {err:?}"),
+                }
             })?;
             let latency = instant.elapsed();
 
@@ -629,11 +636,7 @@ impl wasmtime_wasi::Subscribe for RemoteIo {
     async fn ready(&mut self) {}
 }
 
-pub async fn run_scenario(
-    runtime: Runtime,
-    scenario: Vec<u8>,
-    config: Config,
-) {
+pub async fn run_scenario(runtime: Runtime, scenario: Vec<u8>, config: Config) {
     let mut executor = Executors::create_executor(config, runtime).await;
 
     tokio::spawn(async move {
@@ -643,5 +646,3 @@ pub async fn run_scenario(
         executor.run().await;
     });
 }
-
-
