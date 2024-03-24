@@ -67,7 +67,17 @@ Crows is not production ready, so it misses some of the features, but my persona
 
 ### Installing
 
-...
+At the moment you can install the `crows` only through the `cargo` command:
+
+```
+cargo install crows
+```
+
+And then you can use it to run a scenario:
+
+```
+crows run scenario.wasm
+```
   
 ### Usage
 
