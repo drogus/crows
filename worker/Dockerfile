@@ -20,10 +20,10 @@ RUN apt-get update \
 
 RUN mkdir -p /app
 
-COPY --from=builder /app/target/release/worker /app/worker
+COPY --from=builder /app/target/release/crows-worker /app/crows-worker
 
 WORKDIR /app
 
 ENV WORKER_NAME=$HOST
 
-ENTRYPOINT ["/app/worker"]
+ENTRYPOINT ["/app/crows-worker"]

@@ -19,8 +19,8 @@ RUN apt-get update \
 
 RUN mkdir -p /app
 
-COPY --from=builder /usr/src/app/target/release/cli /app/app
+COPY --from=builder /usr/src/app/target/release/crows-cli /app/crows-cli
 
 WORKDIR /app
 
-ENTRYPOINT ["/app/app"]
+ENTRYPOINT ["/app/crows-cli"]
