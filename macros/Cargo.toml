@@ -2,6 +2,11 @@
 name = "crows-macros"
 version.workspace = true
 edition.workspace = true
+license-file = "LICENSE"
+description = "Macros for Crows"
+documentation = "https://docs.rs/crows-macros"
+homepage = "https://github.com/drogus/crows"
+repository = "https://github.com/drogus/crows"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

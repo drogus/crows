@@ -2,6 +2,11 @@
 name = "crows-wasm"
 version.workspace = true
 edition.workspace = true
+license-file = "LICENSE"
+description = "WASM related utils for Crows"
+documentation = "https://docs.rs/crows-wasm"
+homepage = "https://github.com/drogus/crows"
+repository = "https://github.com/drogus/crows"
 
 [dependencies]
 slab = "0.4"

@@ -2,6 +2,11 @@
 name = "crows-service"
 version.workspace = true
 edition.workspace = true
+license-file = "LICENSE"
+description = "Service macro used for the Crows RPC communication"
+documentation = "https://docs.rs/crows-service"
+homepage = "https://github.com/drogus/crows"
+repository = "https://github.com/drogus/crows"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

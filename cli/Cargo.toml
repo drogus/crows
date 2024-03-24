@@ -2,6 +2,11 @@
 name = "crows-cli"
 version.workspace = true
 edition.workspace = true
+license-file = "LICENSE"
+description = "CLI for using the Crows stress testing tool"
+documentation = "https://docs.rs/crows-cli"
+homepage = "https://github.com/drogus/crows"
+repository = "https://github.com/drogus/crows"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [[bin]]

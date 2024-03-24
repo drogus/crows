@@ -2,6 +2,11 @@
 name = "crows-worker"
 version.workspace = true
 edition.workspace = true
+license-file = "LICENSE"
+description = "Worker executing scenarios for Crows"
+documentation = "https://docs.rs/crows-worker"
+homepage = "https://github.com/drogus/crows"
+repository = "https://github.com/drogus/crows"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

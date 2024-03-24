@@ -2,6 +2,11 @@
 name = "crows-utils"
 version.workspace = true
 edition.workspace = true
+license-file = "LICENSE"
+description = "Code shared between various Crows libraries"
+documentation = "https://docs.rs/crows-utils"
+homepage = "https://github.com/drogus/crows"
+repository = "https://github.com/drogus/crows"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

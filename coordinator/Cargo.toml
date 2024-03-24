@@ -2,6 +2,11 @@
 name = "crows-coordinator"
 version.workspace = true
 edition.workspace = true
+license-file = "LICENSE"
+description = "Coordinator server for Crows"
+documentation = "https://docs.rs/crows-coordinator"
+homepage = "https://github.com/drogus/crows"
+repository = "https://github.com/drogus/crows"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

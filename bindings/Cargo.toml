@@ -2,6 +2,11 @@
 name = "crows-bindings"
 version.workspace = true
 edition.workspace = true
+license-file = "LICENSE"
+description = "WASM bindings for Crows scenarios"
+documentation = "https://docs.rs/crows-bindings"
+homepage = "https://github.com/drogus/crows"
+repository = "https://github.com/drogus/crows"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
