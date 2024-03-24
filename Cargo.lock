@@ -598,18 +598,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "crows-bindings"
-version = "0.1.0"
-dependencies = [
- "crows-macros",
- "crows-shared",
- "serde",
- "serde_json",
- "serde_with",
-]
-
-[[package]]
-name = "crows-cli"
+name = "crows"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -625,6 +614,17 @@ dependencies = [
  "tokio-serde",
  "tokio-util",
  "uuid",
+]
+
+[[package]]
+name = "crows-bindings"
+version = "0.1.0"
+dependencies = [
+ "crows-macros",
+ "crows-shared",
+ "serde",
+ "serde_json",
+ "serde_with",
 ]
 
 [[package]]

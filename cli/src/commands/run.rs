@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crows_cli::output::{drive_progress, LocalProgressFetcher};
+use crows::output::{drive_progress, LocalProgressFetcher};
 use crows_utils::services::RunId;
 use crows_wasm::{fetch_config, run_scenario};
 
