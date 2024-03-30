@@ -197,11 +197,15 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             }
 
             impl #server_ident {
-                pub async fn accept<T>(&self, service: T) -> Option<<T as utils::Service<#dummy_ident>>::Client>
-                where T: utils::Service<#dummy_ident> + Clone + 'static {
+                pub async fn accept<T, F, Fut>(&self, create_service_callback: F) -> Result<<T as utils::Service<#dummy_ident>>::Client, std::io::Error>
+                where
+                    T: utils::Service<#dummy_ident> + Clone + 'static,
+                    F: FnOnce(<T as utils::Service<#dummy_ident>>::Client) -> Fut + Send + 'static,
+                    Fut: std::future::Future<Output = Result<T, std::io::Error>> + Send
+                {
                     let (sender, receiver, close_receiver) = self.server.accept().await?;
-                    let client = utils::Client::new(sender, receiver, service, Some(close_receiver));
-                    Some(client)
+                    let client = utils::Client::new(sender, receiver, Some(close_receiver), create_service_callback).await?;
+                    Ok(client)
                 }
             }
 
@@ -218,14 +222,16 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
         let other_side_snake = other_side.to_string().to_case(Case::Snake);
         let connect_to_ident = Ident::new(&format!("connect_to_{other_side_snake}"), ident.span());
         quote! {
-            pub async fn #connect_to_ident<A, T>(addr: A, service: T)
+            pub async fn #connect_to_ident<A, T, F, Fut>(addr: A, create_service_callback: F)
                 -> Result<<T as utils::Service<#dummy_ident>>::Client, std::io::Error>
                 where
                     A: utils::tokio::net::ToSocketAddrs,
                     T: utils::Service<#dummy_ident> + Clone + 'static,
+                    F: FnOnce(<T as utils::Service<#dummy_ident>>::Client) -> Fut + Send + 'static,
+                    Fut: std::future::Future<Output = Result<T, std::io::Error>> + Send
             {
                 let (sender, mut receiver) = utils::create_client(addr).await?;
-                let client = utils::Client::new(sender, receiver, service, None);
+                let client = utils::Client::new(sender, receiver, None, create_service_callback).await?;
                 Ok(client)
             }
         }
@@ -282,8 +288,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
         };
 
         client_methods.push(quote! {
-            // TODO: this should not be anyhow, but rather io::error or sth along the lines
-            pub async fn #method_ident(#receiver, #(#args),*) -> anyhow::Result<#output_ty> {
+            pub async fn #method_ident(#receiver, #(#args),*) -> Result<#output_ty, std::io::Error> {
                 let response = self.client
                     .request::<#request_ident, #response_ident>(#request_ident::#method_request_ident(
                         #method_request_ident { #(#arg_names),* },
@@ -296,17 +301,12 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
             }
         });
 
-        // TODO: I don't have too much time at the moment and I want to finish a few other things,
-        // so I made a simplification in the services code at a cost of a slightly worse experience
-        // when implementing services. Now we *always* pass a client to service handler methods as
-        // a first argument. Ideally we would check if the client is defined as an argument and
-        // pass it only when needed.
         trait_methods.push(quote! {
-            fn #method_ident(#receiver, client: #other_side_client_ident, #(#args),*) -> impl std::future::Future<Output = #output_ty> + Send;
+            fn #method_ident(#receiver, #(#args),*) -> impl std::future::Future<Output = #output_ty> + Send;
         });
 
         service_match_arms.push(quote! {
-            #request_ident::#method_request_ident(request) => #response_ident::#method_response_ident(self.#method_ident(client, #(request.#arg_names),*).await),
+            #request_ident::#method_request_ident(request) => #response_ident::#method_response_ident(self.#method_ident(#(request.#arg_names),*).await),
         });
     }
 
@@ -325,7 +325,6 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
 
             fn handle_request(
                 &self,
-                client: Self::Client,
                 message: Self::Request,
             ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Self::Response> + Send + '_>> {
                 Box::pin(async {

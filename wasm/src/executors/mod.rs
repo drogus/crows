@@ -26,19 +26,23 @@ impl Executors {
         }
     }
 
-    pub async fn run(&mut self) {
+    pub async fn run(&mut self) -> anyhow::Result<()> {
         match self {
             Executors::ConstantArrivalRateExecutor(ref mut executor) => {
-                executor.run().await.unwrap()
+                executor.run().await?
             }
         }
+
+        Ok(())
     }
 
-    pub async fn prepare(&mut self) {
+    pub async fn prepare(&mut self) -> anyhow::Result<()> {
         match self {
             Executors::ConstantArrivalRateExecutor(ref mut executor) => {
-                executor.prepare().await.unwrap()
+                executor.prepare().await?
             }
         }
+
+        Ok(())
     }
 }

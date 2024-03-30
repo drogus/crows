@@ -228,7 +228,7 @@ impl ProgressFetcher for CoordinatorClient {
         &mut self,
         id: RunId,
     ) -> anyhow::Result<Option<HashMap<String, RunInfo>>> {
-        CoordinatorClient::get_run_status(self, id).await
+        Ok(CoordinatorClient::get_run_status(self, id).await?)
     }
 }
 

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::ErrorKind;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -32,12 +33,12 @@ pub struct Server {
 impl Server {
     pub async fn accept(
         &self,
-    ) -> Option<(
+    ) -> Result<(
         UnboundedSender<Message>,
         UnboundedReceiver<Message>,
         oneshot::Receiver<()>,
-    )> {
-        let (socket, _) = self.listener.accept().await.ok()?;
+    ), std::io::Error> {
+        let (socket, _) = self.listener.accept().await?;
         let (reader, writer) = socket.into_split();
 
         // Delimit frames using a length header
@@ -81,7 +82,7 @@ impl Server {
             }
         });
 
-        Some((serialized_sender, deserialized_receiver, close_receiver))
+        Ok((serialized_sender, deserialized_receiver, close_receiver))
     }
 }
 
@@ -176,7 +177,7 @@ impl Client {
     >(
         &self,
         message: T,
-    ) -> anyhow::Result<Y> {
+    ) -> Result<Y, std::io::Error> {
         let message = Message {
             id: Uuid::new_v4(),
             reply_to: None,
@@ -193,32 +194,31 @@ impl Client {
             .await?;
         self.send(message).await?;
 
-        // TODO: rewrite to map
-        match rx.await {
-            Ok(reply) => Ok(serde_json::from_str(&reply)?),
-            Err(e) => Err(e)?,
-        }
+        let reply = rx.await.expect("Listener channel closed without sending a response");
+        Ok(serde_json::from_str(&reply)?)
     }
 
-    async fn send(&self, message: Message) -> anyhow::Result<()> {
-        Ok(self.sender.send(message)?)
+    async fn send(&self, message: Message) -> Result<(), std::io::Error> {
+        Ok(self.sender.send(message).map_err(|_| std::io::Error::new(ErrorKind::ConnectionAborted, "connection closed"))?)
     }
 
-    async fn send_internal(&self, message: InternalMessage) -> anyhow::Result<()> {
-        Ok(self.internal_sender.send(message)?)
+    async fn send_internal(&self, message: InternalMessage) -> Result<(), std::io::Error> {
+        Ok(self.internal_sender.send(message).map_err(|_| std::io::Error::new(ErrorKind::ConnectionAborted, "connection closed"))?)
     }
 
-    pub fn new<T, DummyType>(
+    pub async fn new<T, DummyType, F, Fut>(
         sender: UnboundedSender<Message>,
         mut receiver: UnboundedReceiver<Message>,
-        mut service: T,
         close_receiver: Option<oneshot::Receiver<()>>,
-    ) -> <T as Service<DummyType>>::Client
+        create_service_callback: F,
+    ) -> Result<<T as Service<DummyType>>::Client, std::io::Error>
     where
         T: Service<DummyType> + Send + Sync + 'static + Clone,
         <T as Service<DummyType>>::Request: Send,
         <T as Service<DummyType>>::Response: Send,
         <T as Service<DummyType>>::Client: ClientTrait + Clone + Send + Sync + 'static,
+        F: FnOnce(<T as Service<DummyType>>::Client) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<T, std::io::Error>> + Send
     {
         let (internal_sender, mut internal_receiver) = unbounded_channel();
         let client = T::Client::new(Self {
@@ -227,6 +227,7 @@ impl Client {
             internal_sender,
         });
 
+        let service = create_service_callback(client.clone()).await?;
         let client_clone = client.clone();
         tokio::spawn(async move {
             let mut listeners: HashMap<Uuid, oneshot::Sender<String>> = HashMap::new();
@@ -236,17 +237,17 @@ impl Client {
                         match message {
                             Some(message) => {
                                 if let Some(reply_to) = message.reply_to {
-                                    let reply = listeners.remove(&reply_to).unwrap();
+                                    // TODO: Should this expect be changed into a log line?
+                                    let reply = listeners.remove(&reply_to).expect("Listener should be registered for a message");
                                     if reply.send(message.message).is_err() {
                                         break;
                                     }
                                 } else {
                                     let service_clone = service.clone();
                                     let sender_clone = sender.clone();
-                                    let client_clone = client_clone.clone();
                                     tokio::spawn(async move {
                                         let deserialized = serde_json::from_str::<<T as Service<DummyType>>::Request>(&message.message).unwrap();
-                                        let response = service_clone.handle_request(client_clone, deserialized).await;
+                                        let response = service_clone.handle_request(deserialized).await;
 
                                         let message = Message {
                                             id: Uuid::new_v4(),
@@ -277,7 +278,7 @@ impl Client {
             }
         });
 
-        client
+        Ok(client)
     }
 
     pub async fn get_close_receiver(&self) -> Option<oneshot::Receiver<()>> {
@@ -375,12 +376,14 @@ pub trait Service<DummyType>: Send + Sync {
 
     fn handle_request(
         &self,
-        client: Self::Client,
         message: Self::Request,
     ) -> Pin<Box<dyn Future<Output = Self::Response> + Send + '_>>;
 }
 
 pub async fn process_info_handle(handle: &mut InfoHandle) -> RunInfo {
+    // TODO: I don't like the way the info here is handled. I would much rather 
+    // make it so there's a way to send a message from a worker that will be passed to
+    // to the client through coordinator
     let mut run_info: RunInfo = Default::default();
     run_info.done = false;
 
@@ -398,6 +401,12 @@ pub async fn process_info_handle(handle: &mut InfoHandle) -> RunInfo {
                 run_info.left = Some(left);
             }
             InfoMessage::Done => run_info.done = true,
+            InfoMessage::PrepareError(message) => {
+
+            }
+            InfoMessage::RunError(message) => {
+
+            }
         }
     }
 
@@ -420,6 +429,8 @@ pub enum InfoMessage {
     // elapsed, left
     TimingUpdate((Duration, Duration)),
     Done,
+    PrepareError(String),
+    RunError(String),
 }
 
 pub struct InfoHandle {

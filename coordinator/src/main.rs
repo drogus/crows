@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crows_utils::services::{
     create_coordinator_server, create_worker_to_coordinator_server, ClientClient, CoordinatorError,
-    RunId, WorkerClient, WorkerStatus, RunInfo,
+    RunId, RunInfo, WorkerClient, WorkerStatus,
 };
 use crows_utils::services::{Coordinator, WorkerToCoordinator};
 use crows_wasm::{fetch_config, Instance};
@@ -13,14 +13,10 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
 use uuid::Uuid;
 
-// TODO: I don't like the fact that we have to wrap the client in Mutex and option. It should
-// be easier to match the client object with the request to the service. I should probably
-// add a context object at some point.
-// TODO: Client should probably be thread safe for easier handling
 #[derive(Default, Clone)]
 struct WorkerToCoordinatorService {
-    scenarios: Arc<Mutex<HashMap<String, Vec<u8>>>>,
-    workers: Arc<Mutex<HashMap<Uuid, WorkerEntry>>>,
+    worker_name: String,
+    worker_id: Uuid,
 }
 
 #[derive(Clone)]
@@ -30,7 +26,7 @@ struct WorkerEntry {
 }
 
 impl WorkerToCoordinator for WorkerToCoordinatorService {
-    async fn ping(&self, _: WorkerClient) -> String {
+    async fn ping(&self) -> String {
         "OK".into()
     }
 }
@@ -45,7 +41,6 @@ struct CoordinatorService {
 impl Coordinator for CoordinatorService {
     async fn upload_scenario(
         &self,
-        _client: ClientClient,
         name: String,
         content: Vec<u8>,
     ) -> Result<(), CoordinatorError> {
@@ -72,7 +67,6 @@ impl Coordinator for CoordinatorService {
 
     async fn start(
         &self,
-        _: ClientClient,
         name: String,
         workers_number: usize,
     ) -> Result<(RunId, Vec<String>), CoordinatorError> {
@@ -90,11 +84,12 @@ impl Coordinator for CoordinatorService {
             .ok_or(CoordinatorError::NoSuchModule(name.clone()))?
             .to_owned();
         drop(scenarios);
-        let mut runs = Vec::new(); 
+        let mut runs = Vec::new();
 
         let (runtime, _) = crows_wasm::Runtime::new(&scenario)
             .map_err(|err| CoordinatorError::FailedToCreateRuntime(err.to_string()))?;
-        let (instance, _, mut store) = runtime.new_instance()
+        let (instance, _, mut store) = runtime
+            .new_instance()
             .await
             .map_err(|_| CoordinatorError::FailedToCompileModule)?;
         let config = fetch_config(instance, &mut store)
@@ -126,28 +121,35 @@ impl Coordinator for CoordinatorService {
         Ok((id, worker_names))
     }
 
-    async fn get_run_status(&self, _: ClientClient, id: RunId) -> Option<HashMap<String, RunInfo>> {
+    async fn get_run_status(&self, id: RunId) -> Option<HashMap<String, RunInfo>> {
         let runs = self.runs.read().await;
         let workers = runs.get(&id)?;
         let futures = workers.into_iter().map(|worker| {
             let id = id.clone();
             async move {
                 match worker.client.get_run_status(id).await {
-                    Ok(run_info) => {
-                        Some((worker.hostname.clone(), run_info))
-                    },
+                    Ok(run_info) => Some((worker.hostname.clone(), run_info)),
                     Err(err) => {
-                        eprintln!("Could not fetch run info from worker {}: {:?}", worker.hostname, err);
+                        eprintln!(
+                            "Could not fetch run info from worker {}: {:?}",
+                            worker.hostname, err
+                        );
                         None
                     }
                 }
             }
         });
 
-        Some(futures::future::join_all(futures).await.into_iter().filter_map(|r| r).collect())
+        Some(
+            futures::future::join_all(futures)
+                .await
+                .into_iter()
+                .filter_map(|r| r)
+                .collect(),
+        )
     }
 
-    async fn list_workers(&self, _: ClientClient) -> Vec<String> {
+    async fn list_workers(&self) -> Vec<String> {
         self.workers
             .lock()
             .await
@@ -179,14 +181,17 @@ pub async fn main() {
             .unwrap();
 
         loop {
-            let service = WorkerToCoordinatorService {
-                scenarios: scenarios.clone(),
-                workers: workers.clone(),
-            };
-
             let scenarios = scenarios.clone();
             let workers = workers.clone();
-            if let Some(mut client) = server.accept(service).await {
+            let create_service = |client: WorkerClient| async move {
+                // TODO: remove this unwrap
+                let data = client.get_data().await?;
+                Ok(WorkerToCoordinatorService {
+                    worker_name: data.hostname,
+                    worker_id: data.id,
+                })
+            };
+            if let Ok(client) = server.accept(create_service.clone()).await {
                 tokio::spawn(async move {
                     println!("Worker connected");
                     let close_receiver = client.get_close_receiver().await;
@@ -231,13 +236,14 @@ pub async fn main() {
         let server = create_coordinator_server(format!("0.0.0.0:{client_port}"))
             .await
             .unwrap();
-        let service = CoordinatorService {
-            scenarios,
-            workers,
-            runs: Default::default(),
+        let create_service = |_client| async move {
+            Ok(CoordinatorService {
+                scenarios,
+                workers,
+                runs: Default::default(),
+            })
         };
-
-        while let Some(mut client) = server.accept(service.clone()).await {
+        while let Ok(client) = server.accept(create_service.clone()).await {
             tokio::spawn(async move {
                 // we don't send any messages for the client, so in order to not drop it
                 // (and thus disconnect), we need to wait

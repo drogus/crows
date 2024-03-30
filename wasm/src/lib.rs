@@ -564,7 +564,11 @@ pub async fn run_wasm(
         .get_typed_func::<(), ()>(&mut store, "scenario")?;
 
     if let Err(err) = func.call_async(&mut store, ()).await {
-        if let Err(e) = store.data().stderr_sender.send(format!("Encountered an error when running a scenario: {err:?}").as_bytes().to_vec()) {
+        if let Err(e) = store.data().stderr_sender.send(
+            format!("Encountered an error when running a scenario: {err:?}")
+                .as_bytes()
+                .to_vec(),
+        ) {
             eprintln!("Problem when sending logs to worker: {e:?}");
         }
     }
@@ -649,12 +653,25 @@ impl wasmtime_wasi::Subscribe for RemoteIo {
 }
 
 pub async fn run_scenario(runtime: Runtime, scenario: Vec<u8>, config: Config) {
+    let info_sender = runtime.info_sender.clone();
     let mut executor = Executors::create_executor(config, runtime).await;
 
     tokio::spawn(async move {
         // TODO: prepare should be an entirely separate step and coordinator should wait for
         // prepare from all of the workers
-        executor.prepare().await;
-        executor.run().await;
+        if let Err(err) = executor.prepare().await {
+            let message = format!("Executor's prepare() function errored out: {err:?}");
+            eprintln!("{message}");
+            if let Err(err) = info_sender.send(InfoMessage::PrepareError(message)) {
+                eprintln!("Couldn't send InfoMessage::PrepareError message to the coordinator. Error: {err:?}");
+            }
+        }
+        if let Err(err) = executor.run().await {
+            let message = format!("Executor's run() function errored out: {err:?}");
+            eprintln!("{message}");
+            if let Err(err) = info_sender.send(InfoMessage::RunError(message)) {
+                eprintln!("Couldn't send InfoMessage::RunError message to the coordinator. Error: {err:?}");
+            }
+        }
     });
 }

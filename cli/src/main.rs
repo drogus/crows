@@ -52,8 +52,7 @@ enum WorkersCommands {
 
 async fn create_coordinator() -> anyhow::Result<CoordinatorClient> {
     let url = std::env::var("CROWS_COORDINATOR_URL").unwrap_or("127.0.0.1:8282".to_string());
-    let service = ClientService {};
-    Ok(connect_to_coordinator(url, service).await?)
+    Ok(connect_to_coordinator(url, |_| async { Ok(ClientService {}) }).await?)
 }
 
 #[tokio::main]

@@ -23,17 +23,16 @@ struct WorkerService {
 }
 
 impl Worker for WorkerService {
-    async fn upload_scenario(&self, _: WorkerToCoordinatorClient, name: String, content: Vec<u8>) {
+    async fn upload_scenario(&self, name: String, content: Vec<u8>) {
         self.scenarios.write().await.insert(name, content);
     }
 
-    async fn ping(&self, _: WorkerToCoordinatorClient) -> String {
+    async fn ping(&self) -> String {
         todo!()
     }
 
     async fn start(
         &self,
-        _: WorkerToCoordinatorClient,
         name: String,
         config: crows_shared::Config,
         id: RunId,
@@ -55,18 +54,17 @@ impl Worker for WorkerService {
         Ok(())
     }
 
-    async fn get_data(&self, _: WorkerToCoordinatorClient) -> WorkerData {
+    async fn get_data(&self) -> WorkerData {
         WorkerData {
             id: Uuid::new_v4(),
             hostname: self.hostname.clone(),
         }
     }
 
-    async fn get_run_status(&self, _: WorkerToCoordinatorClient, id: RunId) -> RunInfo {
+    async fn get_run_status(&self, id: RunId) -> RunInfo {
         if let Some(handle) = self.runs.write().await.get_mut(&id) {
-            process_info_handle(handle).await
+            return process_info_handle(handle).await;
         } else {
-            // TODO: this should really be just None
             Default::default()
         }
     }
@@ -82,15 +80,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let handles: Vec<RuntimeHandle> = Default::default();
     let scenarios: ScenariosList = Default::default();
 
-    let service = WorkerService {
-        scenarios: scenarios.clone(),
-        hostname,
-        runs: Default::default(),
-        environment: crows_wasm::Environment::new().unwrap(),
-    };
-
     println!("Connecting to {coordinator_address}");
-    let client = connect_to_worker_to_coordinator(coordinator_address, service)
+    let create_service_callback = |_client| async move {
+        Ok(WorkerService {
+            scenarios: scenarios.clone(),
+            hostname,
+            runs: Default::default(),
+            environment: crows_wasm::Environment::new().expect("Could not create a WASM environment"),
+        })
+    };
+    let client = connect_to_worker_to_coordinator(coordinator_address, create_service_callback)
         .await
         .unwrap();
 
