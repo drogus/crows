@@ -96,7 +96,10 @@ pub fn print(
     )?;
 
     for (name, worker) in workers {
-        if worker.done {
+        // TODO: this should really be an enum
+        if let Some(_) = worker.error {
+            execute!(stdout, Print(format!("{}: Error", name,)), MoveToNextLine(1),)?;
+        } else if worker.done {
             execute!(stdout, Print(format!("{}: Done", name,)), MoveToNextLine(1),)?;
         } else {
             let progress_percentage = worker.duration.as_secs_f64()
@@ -118,6 +121,32 @@ pub fn print(
     }
     if last {
         execute!(stdout, Print("\n"),)?;
+    }
+
+    stdout.flush()?;
+
+    Ok(())
+}
+
+pub fn print_workers_summary(
+    stdout: &mut Stdout,
+    workers: &HashMap<String, WorkerState>,
+) -> anyhow::Result<()> {
+    let (_, height) = terminal::size()?;
+
+    execute!(
+        stdout,
+        MoveTo(0, height - workers.len() as u16 + 1),
+        Clear(ClearType::FromCursorDown),
+        MoveUp(1),
+    )?;
+
+    for (name, worker) in workers {
+        if let Some(ref msg) = worker.error {
+            execute!(stdout, Print(format!("{}: Error - {msg}\n", name,)),)?;
+        } else if worker.done {
+            execute!(stdout, Print(format!("{}: Done\n", name,)),)?;
+        }
     }
 
     stdout.flush()?;
@@ -264,7 +293,7 @@ pub async fn drive_progress(
             InfoMessage::RunError(message) => state.error = Some(message),
         }
 
-        if worker_states.values().all(|s| s.done) {
+        if worker_states.values().all(|s| s.done || s.error.is_some()) {
             break;
         }
 
@@ -308,7 +337,7 @@ pub async fn drive_progress(
     ));
     lines.push(format!("\n\n"));
 
-    print(&mut stdout, progress_lines, lines, &worker_states, true)?;
+    print_workers_summary(&mut stdout, &worker_states)?;
 
     Ok(())
 }
