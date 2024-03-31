@@ -1,16 +1,24 @@
 use std::path::PathBuf;
 
-use crows_utils::services::connect_to_coordinator;
+use crows_utils::services::{connect_to_coordinator, RunId};
 use crows_utils::services::{Client, CoordinatorClient};
+use crows_utils::InfoMessage;
 
 use clap::{Parser, Subcommand};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 mod commands;
 
 #[derive(Clone)]
-struct ClientService;
+struct ClientService {
+    updates_sender: UnboundedSender<(String, InfoMessage)>,
+}
 
-impl Client for ClientService {}
+impl Client for ClientService {
+    async fn update(&self, _: RunId, worker_name: String, info: InfoMessage) {
+        let _= self.updates_sender.send((worker_name, info));
+    }
+}
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -50,9 +58,13 @@ enum WorkersCommands {
     List,
 }
 
-async fn create_coordinator() -> anyhow::Result<CoordinatorClient> {
+async fn create_coordinator() -> anyhow::Result<(CoordinatorClient, UnboundedReceiver<(String, InfoMessage)>)>
+{
+    let (updates_sender, updates_receiver) = unbounded_channel();
     let url = std::env::var("CROWS_COORDINATOR_URL").unwrap_or("127.0.0.1:8282".to_string());
-    Ok(connect_to_coordinator(url, |_| async { Ok(ClientService {}) }).await?)
+    let coordinator =
+        connect_to_coordinator(url, |_| async { Ok(ClientService { updates_sender }) }).await?;
+    Ok((coordinator, updates_receiver))
 }
 
 #[tokio::main]
@@ -62,7 +74,7 @@ pub async fn main() -> anyhow::Result<()> {
     match &cli.command {
         Some(Commands::Upload { name, path }) => {
             let content = std::fs::read(path)?;
-            let coordinator = create_coordinator().await?;
+            let (coordinator, _) = create_coordinator().await?;
 
             coordinator.upload_scenario(name.clone(), content).await??;
         }
@@ -70,12 +82,12 @@ pub async fn main() -> anyhow::Result<()> {
             name,
             workers_number,
         }) => {
-            let mut coordinator = create_coordinator().await?;
-            commands::start(&mut coordinator, name, workers_number).await?;
+            let (mut coordinator, updates_receiver) = create_coordinator().await?;
+            commands::start(&mut coordinator, name, workers_number, updates_receiver).await?;
         }
         Some(Commands::Workers { command }) => match &command {
             Some(WorkersCommands::List) => {
-                let coordinator = create_coordinator().await?;
+                let (coordinator, _) = create_coordinator().await?;
                 let workers = coordinator.list_workers().await?;
                 println!(
                     "Available workers list:\n{}",

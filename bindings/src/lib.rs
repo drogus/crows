@@ -48,7 +48,6 @@ fn extract_from_return_value(value: u64) -> (u8, u32, u32) {
 mod bindings {
     #[link(wasm_import_module = "crows")]
     extern "C" {
-        pub fn log(content: *mut u8, content_len: usize);
         pub fn http(content: *mut u8, content_len: usize) -> u64;
         pub fn consume_buffer(index: u32, content: *mut u8, content_len: usize);
         pub fn set_config(content: *mut u8, content_len: usize) -> u32;

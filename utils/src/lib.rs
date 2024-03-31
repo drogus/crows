@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use futures::prelude::*;
 use futures::TryStreamExt;
-use services::{RunInfo, RequestInfo, IterationInfo};
+use services::{IterationInfo, RequestInfo};
 use std::future::Future;
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio::sync::RwLock;
@@ -33,11 +33,14 @@ pub struct Server {
 impl Server {
     pub async fn accept(
         &self,
-    ) -> Result<(
-        UnboundedSender<Message>,
-        UnboundedReceiver<Message>,
-        oneshot::Receiver<()>,
-    ), std::io::Error> {
+    ) -> Result<
+        (
+            UnboundedSender<Message>,
+            UnboundedReceiver<Message>,
+            oneshot::Receiver<()>,
+        ),
+        std::io::Error,
+    > {
         let (socket, _) = self.listener.accept().await?;
         let (reader, writer) = socket.into_split();
 
@@ -93,7 +96,7 @@ where
     // Bind a server socket
     let listener = TcpListener::bind(addr).await?;
 
-    // println!("listening on {:?}", listener.local_addr());
+    println!("Listening on {:?}", listener.local_addr());
 
     Ok(Server { listener })
 }
@@ -194,16 +197,24 @@ impl Client {
             .await?;
         self.send(message).await?;
 
-        let reply = rx.await.expect("Listener channel closed without sending a response");
+        let reply = rx
+            .await
+            .expect("Listener channel closed without sending a response");
         Ok(serde_json::from_str(&reply)?)
     }
 
     async fn send(&self, message: Message) -> Result<(), std::io::Error> {
-        Ok(self.sender.send(message).map_err(|_| std::io::Error::new(ErrorKind::ConnectionAborted, "connection closed"))?)
+        Ok(self
+            .sender
+            .send(message)
+            .map_err(|_| std::io::Error::new(ErrorKind::ConnectionAborted, "connection closed"))?)
     }
 
     async fn send_internal(&self, message: InternalMessage) -> Result<(), std::io::Error> {
-        Ok(self.internal_sender.send(message).map_err(|_| std::io::Error::new(ErrorKind::ConnectionAborted, "connection closed"))?)
+        Ok(self
+            .internal_sender
+            .send(message)
+            .map_err(|_| std::io::Error::new(ErrorKind::ConnectionAborted, "connection closed"))?)
     }
 
     pub async fn new<T, DummyType, F, Fut>(
@@ -218,7 +229,7 @@ impl Client {
         <T as Service<DummyType>>::Response: Send,
         <T as Service<DummyType>>::Client: ClientTrait + Clone + Send + Sync + 'static,
         F: FnOnce(<T as Service<DummyType>>::Client) -> Fut + Send + 'static,
-        Fut: Future<Output = Result<T, std::io::Error>> + Send
+        Fut: Future<Output = Result<T, std::io::Error>> + Send,
     {
         let (internal_sender, mut internal_receiver) = unbounded_channel();
         let client = T::Client::new(Self {
@@ -227,8 +238,44 @@ impl Client {
             internal_sender,
         });
 
-        let service = create_service_callback(client.clone()).await?;
+        let (service_sender, mut service_receiver) = unbounded_channel::<Message>();
+        let (result_sender, result_receiver) = oneshot::channel::<Result<(), std::io::Error>>();
+
         let client_clone = client.clone();
+        tokio::spawn(async move {
+            let service = match create_service_callback(client_clone).await {
+                Ok(service) => {
+                    //
+                    let _ = result_sender.send(Ok(()));
+                    service
+                }
+                Err(err) => {
+                    let _ = result_sender.send(Err(err));
+                    return;
+                }
+            };
+
+            while let Some(message) = service_receiver.recv().await {
+                let service_clone = service.clone();
+                let sender_clone = sender.clone();
+                tokio::spawn(async move {
+                    let deserialized = serde_json::from_str::<<T as Service<DummyType>>::Request>(
+                        &message.message,
+                    )
+                    .unwrap();
+                    let response = service_clone.handle_request(deserialized).await;
+                    let message = Message {
+                        id: Uuid::new_v4(),
+                        reply_to: Some(message.id),
+                        message: serde_json::to_string(&response).unwrap(),
+                        message_type: std::any::type_name::<T>().to_string(),
+                    };
+
+                    sender_clone.send(message).unwrap();
+                });
+            }
+        });
+
         tokio::spawn(async move {
             let mut listeners: HashMap<Uuid, oneshot::Sender<String>> = HashMap::new();
             loop {
@@ -243,20 +290,7 @@ impl Client {
                                         break;
                                     }
                                 } else {
-                                    let service_clone = service.clone();
-                                    let sender_clone = sender.clone();
-                                    tokio::spawn(async move {
-                                        let deserialized = serde_json::from_str::<<T as Service<DummyType>>::Request>(&message.message).unwrap();
-                                        let response = service_clone.handle_request(deserialized).await;
-
-                                        let message = Message {
-                                            id: Uuid::new_v4(),
-                                            reply_to: Some(message.id),
-                                            message: serde_json::to_string(&response).unwrap(),
-                                            message_type: std::any::type_name::<T>().to_string(),
-                                        };
-                                        sender_clone.send(message).unwrap();
-                                    });
+                                    let _ = service_sender.send(message);
                                 }
                             },
                             None => break,
@@ -278,7 +312,10 @@ impl Client {
             }
         });
 
-        Ok(client)
+        match result_receiver.await.expect("Unreachable") {
+            Ok(()) => Ok(client),
+            Err(e) => Err(e),
+        }
     }
 
     pub async fn get_close_receiver(&self) -> Option<oneshot::Receiver<()>> {
@@ -380,49 +417,12 @@ pub trait Service<DummyType>: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Self::Response> + Send + '_>>;
 }
 
-pub async fn process_info_handle(handle: &mut InfoHandle) -> RunInfo {
-    // TODO: I don't like the way the info here is handled. I would much rather 
-    // make it so there's a way to send a message from a worker that will be passed to
-    // to the client through coordinator
-    let mut run_info: RunInfo = Default::default();
-    run_info.done = false;
-
-    while let Ok(update) = handle.receiver.try_recv() {
-        match update {
-            InfoMessage::Stderr(buf) => run_info.stderr.push(buf),
-            InfoMessage::Stdout(buf) => run_info.stdout.push(buf),
-            InfoMessage::RequestInfo(info) => run_info.request_stats.push(info),
-            InfoMessage::IterationInfo(info) => run_info.iteration_stats.push(info),
-            InfoMessage::InstanceCheckedOut => run_info.active_instances_delta += 1,
-            InfoMessage::InstanceReserved => run_info.capacity_delta += 1,
-            InfoMessage::InstanceCheckedIn => run_info.active_instances_delta -= 1,
-            InfoMessage::TimingUpdate((elapsed, left)) => {
-                run_info.elapsed = Some(elapsed);
-                run_info.left = Some(left);
-            }
-            InfoMessage::Done => run_info.done = true,
-            InfoMessage::PrepareError(message) => {
-
-            }
-            InfoMessage::RunError(message) => {
-
-            }
-        }
-    }
-
-    run_info
-}
-
-// TODO: I don't like that name, I think it should be changed
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum InfoMessage {
     Stderr(Vec<u8>),
     Stdout(Vec<u8>),
     RequestInfo(RequestInfo),
     IterationInfo(IterationInfo),
-    // TODO: I'm not sure if shoving any kind of update here is a good idea,
-    // but at the moment it's the easiest way to pass data back to the client,
-    // so I'm going with it. I'd like to revisit it in the future, though and
-    // consider alternatives
     InstanceCheckedOut,
     InstanceReserved,
     InstanceCheckedIn,

@@ -12,9 +12,8 @@ use std::collections::VecDeque;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 use std::{any::Any, collections::HashMap, io::IoSlice};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::sync::RwLock;
 use tokio::time::Instant;
@@ -652,7 +651,7 @@ impl wasmtime_wasi::Subscribe for RemoteIo {
     async fn ready(&mut self) {}
 }
 
-pub async fn run_scenario(runtime: Runtime, scenario: Vec<u8>, config: Config) {
+pub async fn run_scenario(runtime: Runtime, config: Config) {
     let info_sender = runtime.info_sender.clone();
     let mut executor = Executors::create_executor(config, runtime).await;
 

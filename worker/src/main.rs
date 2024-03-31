@@ -1,4 +1,3 @@
-use crows_utils::{process_info_handle, InfoHandle};
 use crows_wasm::{run_scenario, Runtime};
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
@@ -7,19 +6,19 @@ use tokio::time::sleep;
 use uuid::Uuid;
 
 use crows_utils::services::{
-    connect_to_worker_to_coordinator, RunId, RunInfo, Worker, WorkerData, WorkerError,
+    connect_to_worker_to_coordinator, RunId, Worker, WorkerData, WorkerError,
     WorkerToCoordinatorClient,
 };
 
 type ScenariosList = Arc<RwLock<HashMap<String, Vec<u8>>>>;
-type RunsList = Arc<RwLock<HashMap<RunId, InfoHandle>>>;
 
 #[derive(Clone)]
 struct WorkerService {
     scenarios: ScenariosList,
     hostname: String,
-    runs: RunsList,
+    #[allow(dead_code)]
     environment: crows_wasm::Environment,
+    client: WorkerToCoordinatorClient,
 }
 
 impl Worker for WorkerService {
@@ -44,12 +43,19 @@ impl Worker for WorkerService {
             .clone();
         drop(locked);
 
-        let (runtime, info_handle) = Runtime::new(&scenario)
+        let (runtime, mut info_handle) = Runtime::new(&scenario)
             .map_err(|err| WorkerError::CouldNotCreateRuntime(err.to_string()))?;
 
-        run_scenario(runtime, scenario, config).await;
+        run_scenario(runtime, config).await;
 
-        self.runs.write().await.insert(id, info_handle);
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            while let Some(info) = info_handle.receiver.recv().await {
+                if let Err(_) = client.update(id.clone(), info).await {
+                    break;
+                }
+            }
+        });
 
         Ok(())
     }
@@ -58,14 +64,6 @@ impl Worker for WorkerService {
         WorkerData {
             id: Uuid::new_v4(),
             hostname: self.hostname.clone(),
-        }
-    }
-
-    async fn get_run_status(&self, id: RunId) -> RunInfo {
-        if let Some(handle) = self.runs.write().await.get_mut(&id) {
-            return process_info_handle(handle).await;
-        } else {
-            Default::default()
         }
     }
 }
@@ -81,12 +79,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scenarios: ScenariosList = Default::default();
 
     println!("Connecting to {coordinator_address}");
-    let create_service_callback = |_client| async move {
+    let create_service_callback = |client| async move {
         Ok(WorkerService {
             scenarios: scenarios.clone(),
             hostname,
-            runs: Default::default(),
-            environment: crows_wasm::Environment::new().expect("Could not create a WASM environment"),
+            environment: crows_wasm::Environment::new()
+                .expect("Could not create a WASM environment"),
+            client,
         })
     };
     let client = connect_to_worker_to_coordinator(coordinator_address, create_service_callback)

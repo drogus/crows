@@ -17,7 +17,7 @@ pub struct ConstantArrivalRateExecutor {
 // tests maybe?
 impl Executor for ConstantArrivalRateExecutor {
     async fn run(&mut self) -> anyhow::Result<()> {
-        anyhow::bail!("test");
+        // anyhow::bail!("test");
         let update_duration = Duration::from_millis(500);
         let rate_per_second = self.config.rate as f64 / self.config.time_unit.as_secs_f64();
         let sleep_duration = Duration::from_secs_f64(1.0 / rate_per_second);

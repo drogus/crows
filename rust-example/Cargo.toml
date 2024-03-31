@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 [dependencies]
 rand = "0.8"
 
-crows-bindings.workspace = true
+crows-bindings = { path = "../bindings" }
 
 [profile.release]
 lto = true

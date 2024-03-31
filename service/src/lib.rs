@@ -306,7 +306,10 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
         });
 
         service_match_arms.push(quote! {
-            #request_ident::#method_request_ident(request) => #response_ident::#method_response_ident(self.#method_ident(#(request.#arg_names),*).await),
+            #request_ident::#method_request_ident(request) => {
+                let res = #response_ident::#method_response_ident(self.#method_ident(#(request.#arg_names),*).await);
+                res
+            }
         });
     }
 
@@ -327,6 +330,7 @@ pub fn service(attr: TokenStream, original_input: TokenStream) -> TokenStream {
                 &self,
                 message: Self::Request,
             ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Self::Response> + Send + '_>> {
+
                 Box::pin(async {
                     match message {
                         #(#service_match_arms)*

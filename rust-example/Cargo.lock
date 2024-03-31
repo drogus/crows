@@ -68,7 +68,7 @@ checksum = "06ea2b9bc92be3c2baa9334a323ebca2d6f074ff852cd1d7b11064035cd3868f"
 
 [[package]]
 name = "crows-bindings"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "crows-macros",
  "crows-shared",
@@ -79,7 +79,7 @@ dependencies = [
 
 [[package]]
 name = "crows-macros"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -88,7 +88,7 @@ dependencies = [
 
 [[package]]
 name = "crows-shared"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",

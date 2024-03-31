@@ -1,6 +1,6 @@
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
-use crate::{self as utils};
+use crate::{self as utils, InfoMessage};
 use crows_service::service;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -53,6 +53,7 @@ impl Into<Uuid> for RunId {
 #[service(variant = "server", other_side = Worker)]
 pub trait WorkerToCoordinator {
     async fn ping(&self) -> String;
+    async fn update(&self, run_id: RunId, info: InfoMessage);
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -69,7 +70,6 @@ pub trait Coordinator {
         workers_number: usize,
     ) -> Result<(RunId, Vec<String>), CoordinatorError>;
     async fn list_workers() -> Vec<String>;
-    async fn get_run_status(&self, id: RunId) -> Option<HashMap<String, RunInfo>>;
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -89,19 +89,6 @@ pub struct IterationInfo {
     pub latency: Duration,
 }
 
-#[derive(Default, Clone, Serialize, Deserialize, Debug)]
-pub struct RunInfo {
-    pub iteration_stats: Vec<IterationInfo>,
-    pub request_stats: Vec<RequestInfo>,
-    pub stderr: Vec<Vec<u8>>,
-    pub stdout: Vec<Vec<u8>>,
-    pub done: bool,
-    pub elapsed: Option<Duration>,
-    pub left: Option<Duration>,
-    pub active_instances_delta: isize,
-    pub capacity_delta: isize,
-}
-
 #[service(variant = "client", other_side = WorkerToCoordinator)]
 pub trait Worker {
     async fn upload_scenario(&self, name: String, content: Vec<u8>);
@@ -113,8 +100,9 @@ pub trait Worker {
         run_id: RunId,
     ) -> Result<(), WorkerError>;
     async fn get_data(&self) -> WorkerData;
-    async fn get_run_status(&self, id: RunId) -> RunInfo;
 }
 
 #[service(variant = "client", other_side = Coordinator)]
-pub trait Client {}
+pub trait Client {
+    async fn update(&self, run_id: RunId, worker_name: String, info: InfoMessage);
+}

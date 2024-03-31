@@ -16,7 +16,7 @@ fn config() -> ExecutorConfig {
     ExecutorConfig::ConstantArrivalRate(config)
 }
 
-#[export_name = "test"]
+#[export_name = "scenario"]
 pub fn scenario() {
     let i: usize = rand::random();
     println!("log line from a worker, random number: {i}");

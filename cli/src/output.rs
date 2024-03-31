@@ -1,5 +1,6 @@
-use crows_utils::services::{CoordinatorClient, IterationInfo, RequestInfo, RunId, RunInfo};
-use crows_utils::{process_info_handle, InfoHandle};
+use crows_utils::services::{IterationInfo, RequestInfo};
+use crows_utils::InfoMessage;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use std::collections::HashMap;
 use std::io::Stdout;
@@ -33,16 +34,9 @@ pub struct WorkerState {
     pub active_instances: isize,
     pub capacity: isize,
     pub done: bool,
-}
-
-#[derive(Default)]
-pub struct BarData {
-    pub worker_name: String,
-    pub active_vus: usize,
-    pub all_vus: usize,
     pub duration: Duration,
     pub left: Duration,
-    pub done: bool,
+    pub error: Option<String>,
 }
 
 pub trait LatencyInfo {
@@ -74,7 +68,7 @@ pub fn print(
     stdout: &mut Stdout,
     progress_lines: u16,
     lines: Vec<String>,
-    bars: &HashMap<String, BarData>,
+    workers: &HashMap<String, WorkerState>,
     last: bool,
 ) -> anyhow::Result<()> {
     let (_, height) = terminal::size()?;
@@ -101,26 +95,22 @@ pub fn print(
         MoveUp(1),
     )?;
 
-    for (_, bar) in bars {
-        if bar.done {
-            execute!(
-                stdout,
-                Print(format!("{}: Done", bar.worker_name,)),
-                MoveToNextLine(1),
-            )?;
+    for (name, worker) in workers {
+        if worker.done {
+            execute!(stdout, Print(format!("{}: Done", name,)), MoveToNextLine(1),)?;
         } else {
-            let progress_percentage = bar.duration.as_secs_f64()
-                / (bar.duration.as_secs_f64() + bar.left.as_secs_f64())
+            let progress_percentage = worker.duration.as_secs_f64()
+                / (worker.duration.as_secs_f64() + worker.left.as_secs_f64())
                 * 100 as f64;
             execute!(
                 stdout,
                 Print(format!(
                     "{}: [{: <25}] {:.2}% ({}/{})",
-                    bar.worker_name,
+                    name,
                     "*".repeat((progress_percentage as usize) / 4),
                     progress_percentage,
-                    bar.active_vus,
-                    bar.all_vus,
+                    worker.active_instances,
+                    worker.capacity,
                 )),
                 MoveToNextLine(1),
             )?;
@@ -215,55 +205,10 @@ where
     }
 }
 
-pub trait ProgressFetcher {
-    #[allow(async_fn_in_trait)]
-    async fn get_run_status(
-        &mut self,
-        id: RunId,
-    ) -> anyhow::Result<Option<HashMap<String, RunInfo>>>;
-}
-
-impl ProgressFetcher for CoordinatorClient {
-    async fn get_run_status(
-        &mut self,
-        id: RunId,
-    ) -> anyhow::Result<Option<HashMap<String, RunInfo>>> {
-        Ok(CoordinatorClient::get_run_status(self, id).await?)
-    }
-}
-
-pub struct LocalProgressFetcher {
-    info_handle: InfoHandle,
-    worker_name: String,
-}
-
-impl LocalProgressFetcher {
-    pub fn new(info_handle: InfoHandle, worker_name: String) -> Self {
-        Self {
-            info_handle,
-            worker_name,
-        }
-    }
-}
-
-impl ProgressFetcher for LocalProgressFetcher {
-    async fn get_run_status(
-        &mut self,
-        _: RunId,
-    ) -> anyhow::Result<Option<HashMap<String, RunInfo>>> {
-        let run_info = process_info_handle(&mut self.info_handle).await;
-        Ok(Some(vec![(self.worker_name.clone(), run_info)].into_iter().collect()))
-    }
-}
-
-pub async fn drive_progress<T>(
-    client: &mut T,
-    run_id: &RunId,
+pub async fn drive_progress(
     worker_names: Vec<String>,
-) -> anyhow::Result<()>
-where
-    T: ProgressFetcher,
-{
+    mut updates_receiver: UnboundedReceiver<(String, InfoMessage)>,
+) -> anyhow::Result<()> {
     let mut stdout = stdout();
 
     let progress_lines = worker_names.len() as u16;
@@ -271,72 +216,59 @@ where
     let mut all_request_stats: Vec<RequestInfo> = Vec::new();
     let mut all_iteration_stats: Vec<IterationInfo> = Vec::new();
     let mut worker_states: HashMap<String, WorkerState> = HashMap::new();
-    let mut bars = HashMap::new();
 
     for name in worker_names {
         worker_states.insert(name.clone(), Default::default());
-
-        bars.insert(
-            name.clone(),
-            BarData {
-                worker_name: name.clone(),
-                left: Duration::from_secs(1),
-                ..Default::default()
-            },
-        );
     }
 
-    loop {
+    while let Some((worker_name, update)) = updates_receiver.recv().await {
         let mut lines = Vec::new();
-        let result = client.get_run_status(run_id.clone()).await.unwrap();
+        let state = worker_states
+            .get_mut(&worker_name)
+            .ok_or(anyhow!("Couldn't findt the worker"))?;
+
+        match update {
+            InfoMessage::Stderr(buf) => {
+                lines.push(format!(
+                    "[ERROR][{worker_name}] {}",
+                    String::from_utf8_lossy(&buf)
+                ));
+            }
+            InfoMessage::Stdout(buf) => {
+                lines.push(format!(
+                    "[INFO][{worker_name}] {}",
+                    String::from_utf8_lossy(&buf)
+                ));
+            }
+            InfoMessage::RequestInfo(info) => {
+                all_request_stats.push(info);
+            }
+            InfoMessage::IterationInfo(info) => {
+                all_iteration_stats.push(info);
+            }
+            InfoMessage::InstanceCheckedOut => {
+                state.active_instances += 1;
+            }
+            InfoMessage::InstanceReserved => {
+                state.capacity += 1;
+            }
+            InfoMessage::InstanceCheckedIn => {
+                state.active_instances -= 1;
+            }
+            InfoMessage::TimingUpdate((elapsed, left)) => {
+                state.duration = elapsed;
+                state.left = left;
+            }
+            InfoMessage::Done => state.done = true,
+            InfoMessage::PrepareError(message) => state.error = Some(message),
+            InfoMessage::RunError(message) => state.error = Some(message),
+        }
 
         if worker_states.values().all(|s| s.done) {
             break;
         }
 
-        for (worker_name, run_info) in result.unwrap().iter() {
-            let state = worker_states
-                .get_mut(worker_name)
-                .ok_or(anyhow!("Couldn't findt the worker"))?;
-            state.active_instances += run_info.active_instances_delta;
-            state.capacity += run_info.capacity_delta;
-
-            all_request_stats.extend(run_info.request_stats.clone());
-            all_iteration_stats.extend(run_info.iteration_stats.clone());
-
-            for log_line in &run_info.stdout {
-                lines.push(format!(
-                    "[INFO][{worker_name}] {}",
-                    String::from_utf8_lossy(log_line)
-                ));
-            }
-            for log_line in &run_info.stderr {
-                lines.push(format!(
-                    "[ERROR][{worker_name}] {}",
-                    String::from_utf8_lossy(log_line)
-                ));
-            }
-
-            if run_info.done {
-                state.done = true;
-            }
-
-            let bar = bars
-                .get_mut(worker_name)
-                .ok_or(anyhow!("Couldn't find bar data for worker {worker_name}"))?;
-            bar.active_vus = state.active_instances as usize;
-            bar.all_vus = state.capacity as usize;
-            if let Some(duration) = run_info.elapsed {
-                bar.duration = duration;
-            }
-            if let Some(left) = run_info.left {
-                bar.left = left;
-            }
-            bar.done = state.done;
-        }
-
-        print(&mut stdout, progress_lines, lines, &bars, false).unwrap();
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        print(&mut stdout, progress_lines, lines, &worker_states, false).unwrap();
     }
 
     let request_summary = calculate_summary(&all_request_stats);
@@ -376,7 +308,7 @@ where
     ));
     lines.push(format!("\n\n"));
 
-    print(&mut stdout, progress_lines, lines, &bars, true)?;
+    print(&mut stdout, progress_lines, lines, &worker_states, true)?;
 
     Ok(())
 }
