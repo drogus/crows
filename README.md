@@ -32,9 +32,9 @@ It will send 10 requests per second to google.com. For information on how to com
 
 ### State of the project
 
-This project is at a "working proof of concept" stage. It has solid foundation as I put a lot of thought into figuring out the best way to implement it, but there are a lot of details that are either missing or are knowingly implemented in a not optimal/best way. I've started thinking about the project about 3 years ago and I've started the current iteration about 1.5 years ago and I decided I have to finish it as soon as possible or it will end up where most of my personal projects - aiming for perfection, half finished and never released.
+This project is at a "minimal working setup" stage. It has solid foundation as I put a lot of thought into figuring out the best way to implement it, but there are a lot of details that are missing, like metrics support, checks, most of the executors etc.
 
-What you should expect then? Most of the basic stuff works, but error handling is quite poor. Stuff will probably break here and there. Error messages may make no sense or may not even reach the CLI if they happen on the server side. Also, there is only one excutor: constant arrival rate. Use if you're curious and/or you would like to contribute, but it's probably not the best idea to use it for anything important or if you value your time. I will update the README once I feel the project is stable enough and feature complete enough for a usable version.
+What you should expect then? Most of the basic stuff works, but it's not been thorouhly tested nor benchmarked. Error messages may make no sense or may not even reach the CLI if they happen on the server side. Use if you're curious and/or you would like to contribute, but it's probably not the best idea to use it for anything important or if you value your time. I will update the README once I feel the project is stable enough and feature complete enough for a usable version.
 
 ### Why crows?
 
