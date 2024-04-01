@@ -18,6 +18,8 @@ pub enum CoordinatorError {
     FailedToCompileModule,
     #[error("Couldn't fetch config: {0}")]
     CouldNotFetchConfig(String),
+    #[error("Not enough workers. Available workers: {0}")]
+    NotEnoughWorkers(usize),
 }
 
 #[derive(Error, Debug, Serialize, Deserialize, Clone)]

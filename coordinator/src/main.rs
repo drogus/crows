@@ -97,7 +97,6 @@ impl Coordinator for CoordinatorService {
         workers_number: usize,
     ) -> Result<(RunId, Vec<String>), CoordinatorError> {
         let id = RunId::new();
-        // TODO: we should check if we have enough workers
         // TODO: also this way we will always choose the same workers. in the future we should
         // either always split between all workers or do some kind of round robin
         // TODO: at the moment we split evenly. in the future we could get some kind of diagnostic
@@ -127,7 +126,12 @@ impl Coordinator for CoordinatorService {
         drop(runs);
 
         let mut worker_names = Vec::new();
-        for (_, worker_entry) in self.workers.lock().await.iter().take(workers_number) {
+        let workers = self.workers.lock().await;
+        if workers_number > workers.len() {
+            return Err(CoordinatorError::NotEnoughWorkers(workers.len()));
+        }
+
+        for (_, worker_entry) in workers.iter().take(workers_number) {
             worker_names.push(worker_entry.hostname.clone());
             let name = name.clone();
             let config = config.clone();
