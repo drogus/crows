@@ -36,8 +36,17 @@ impl WorkerToCoordinator for WorkerToCoordinatorService {
     }
 
     async fn update(&self, id: RunId, update: InfoMessage) {
-        if let Some(client) = self.runs.read().await.get(&id) {
-            let _ = client.update(id, self.worker_name.clone(), update).await;
+        // TODO: we should remove a run if the InfoMessage is saying it's either done
+        //       or errored out
+        let runs = self.runs.read().await;
+        if let Some(client) = runs.get(&id) {
+            if let Err(_) = client
+                .update(id.clone(), self.worker_name.clone(), update)
+                .await
+            {
+                drop(runs);
+                self.runs.write().await.remove(&id);
+            }
         }
     }
 }
@@ -66,10 +75,13 @@ impl Coordinator for CoordinatorService {
             let mut futures = Vec::new();
             futures.push(async {
                 // TODO: handle Result
-                worker_entry
+                if let Err(e) = worker_entry
                     .client
                     .upload_scenario(name.clone(), content.clone())
-                    .await;
+                    .await {
+                        // TODO: should we send it to a client
+                        eprintln!("Error while uploading scenario to a worker: {e:?}");
+                    }
             });
 
             join_all(futures).await;

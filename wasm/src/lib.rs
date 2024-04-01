@@ -182,7 +182,7 @@ impl Runtime {
         let mut inner = self.inner.write().await;
         inner.instances.push_back(handle);
         self.length += 1;
-        self.info_sender.send(InfoMessage::InstanceReserved);
+        let _ = self.info_sender.send(InfoMessage::InstanceReserved);
 
         Ok(())
     }
@@ -206,7 +206,7 @@ impl Runtime {
         // still end up with None
         loop {
             if let Some(handle) = self.checkout_instance().await {
-                self.info_sender.send(InfoMessage::InstanceCheckedOut);
+                let _ = self.info_sender.send(InfoMessage::InstanceCheckedOut);
                 return Ok(handle);
             } else {
                 self.reserve_instance().await?;
@@ -218,7 +218,7 @@ impl Runtime {
 impl RuntimeInner {
     pub async fn checkin_instance(&mut self, instance_handle: InstanceHandle) {
         self.instances.push_back(instance_handle);
-        self.info_sender.send(InfoMessage::InstanceCheckedIn);
+        let _ = self.info_sender.send(InfoMessage::InstanceCheckedIn);
     }
 }
 
@@ -333,7 +333,7 @@ impl WasiHostCtx {
 
             let instant = Instant::now();
             let response = client.execute(reqw_req).await.map_err(|err| {
-                store.request_info_sender.send(RequestInfo {
+                let _ = store.request_info_sender.send(RequestInfo {
                     latency: instant.elapsed(),
                     successful: false,
                 });
@@ -358,7 +358,7 @@ impl WasiHostCtx {
                 message: format!("Problem with fetching the body: {err:?}"),
             })?;
 
-            store.request_info_sender.send(RequestInfo {
+            let _ = store.request_info_sender.send(RequestInfo {
                 latency,
                 successful,
             });
@@ -408,7 +408,8 @@ impl WasiHostCtx {
         );
 
         slice
-            .get_mut((ptr as usize)..((ptr + len) as usize))
+            .get_mut(ptr as usize..)
+            .and_then(|s| s.get_mut(..len as usize))
             .ok_or(anyhow!("Could not fetch slice from WASM memory"))?
             .copy_from_slice(&buffer);
 
@@ -494,9 +495,11 @@ impl Instance {
         tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    Some(message) = stdout_receiver.recv() => info_sender.send(InfoMessage::Stdout(message)),
-                    Some(message) = stderr_receiver.recv() => info_sender.send(InfoMessage::Stderr(message)),
-                    Some(message) = request_info_receiver.recv() => info_sender.send(InfoMessage::RequestInfo(message)),
+                    // If any of the send() methods returns an error we can break the loop as it
+                    // means the listening part is dropped
+                    Some(message) = stdout_receiver.recv() => if let Err(_) = info_sender.send(InfoMessage::Stdout(message)) { break },
+                    Some(message) = stderr_receiver.recv() => if let Err(_) = info_sender.send(InfoMessage::Stderr(message)) { break },
+                    Some(message) = request_info_receiver.recv() => if let Err(_) = info_sender.send(InfoMessage::RequestInfo(message)) { break },
                     else => break
                 };
             }
