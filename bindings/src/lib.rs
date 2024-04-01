@@ -4,6 +4,7 @@ pub use crows_macros::config;
 pub use crows_shared::Config as ExecutorConfig;
 pub use crows_shared::ConstantArrivalRateConfig;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde_json::to_writer;
 use serde_json::{from_slice, to_vec};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
@@ -92,28 +93,29 @@ where
     R: DeserializeOwned,
     E: DeserializeOwned,
 {
-    let mut encoded = to_vec(arguments).unwrap();
+    with_buffer(|mut buf| {
+        to_writer(&mut buf, arguments).unwrap();
 
-    let response = f(&mut encoded);
+        let response = f(buf);
 
-    let (status, length, index) = extract_from_return_value(response);
+        let (status, length, index) = extract_from_return_value(response);
 
-    let mut buf = encoded;
-    buf.clear();
+        buf.try_reserve_exact(length as usize).unwrap();
 
-    // when using reserve_exact it guarantees capacity to be vector.len() + additional long,
-    // thus we can just use length for reserving
-    buf.reserve_exact(length as usize);
+        consume_buffer(index, buf, length as usize);
 
+        if status == 0 {
+            Ok(from_slice(&buf).expect("Couldn't decode message from the host"))
+        } else {
+            Err(from_slice(&buf).expect("Couldn't decode message from the host"))
+        }
+    })
+}
+
+fn consume_buffer(index: u32, buf: &mut Vec<u8>, content_len: usize) {
     unsafe {
-        bindings::consume_buffer(index, buf.as_mut_ptr(), length as usize);
-        buf.set_len(length as usize);
-    }
-
-    if status == 0 {
-        Ok(from_slice(&buf).expect("Couldn't decode message from the host"))
-    } else {
-        Err(from_slice(&buf).expect("Couldn't decode message from the host"))
+        bindings::consume_buffer(index, buf.as_mut_ptr(), content_len as usize);
+        buf.set_len(content_len as usize)
     }
 }
 

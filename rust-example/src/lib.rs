@@ -20,7 +20,7 @@ fn config() -> ExecutorConfig {
 pub fn scenario() {
     let i: usize = rand::random();
     println!("log line from a worker, random number: {i}");
-    http_request(
+    let _ = http_request(
         "https://google.com".into(), GET, HashMap::new(), "".into(),
     );
 }
