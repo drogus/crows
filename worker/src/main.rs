@@ -97,14 +97,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 client,
             })
         };
-        let client = connect_to_worker_to_coordinator(coordinator_address.clone(), create_service_callback)
-            .await
-            .unwrap();
+        let client = match connect_to_worker_to_coordinator(
+            coordinator_address.clone(),
+            create_service_callback,
+        )
+        .await
+        {
+            Ok(client) => client,
+            Err(e) => {
+                eprintln!("Error when trying to connect to the coordinator: {e}");
+                eprintln!("Retrying in 5 seconds");
+                sleep(Duration::from_secs(5)).await;
+                continue;
+            }
+        };
 
         loop {
             if let Err(_) = client.ping().await {
                 // we lost connection, break and try to reconnect
-                eprintln!("Connection to the coordinator is broken, waiting 5s for a reconnect try");
+                eprintln!(
+                    "Connection to the coordinator is broken, waiting 5s for a reconnect try"
+                );
                 sleep(Duration::from_secs(5)).await;
                 break;
             }
