@@ -423,6 +423,10 @@ pub enum InfoMessage {
     Stdout(Vec<u8>),
     RequestInfo(RequestInfo),
     IterationInfo(IterationInfo),
+    // TODO: One thing that I'm worried about is sending updates right when they happen
+    // I would like to benchmark this approach vs sending updates in bulk, like every
+    // 500ms or so. For example group multiple instance checked out/in or request info
+    // values
     InstanceCheckedOut,
     InstanceReserved,
     InstanceCheckedIn,
