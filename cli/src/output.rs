@@ -304,7 +304,7 @@ pub async fn drive_progress(
     let iteration_summary = calculate_summary(&all_iteration_stats);
 
     let mut lines = Vec::new();
-    lines.push(format!("\n\nSummary:\n"));
+    lines.push(format!("\nSummary:\n"));
     lines.push(format!(
         "http_req_duration..........: avg={}\tmin={}\tmed={}\tmax={}\tp(90)={}\tp(95)={}\n",
         format_duration(request_summary.avg),
@@ -335,7 +335,8 @@ pub async fn drive_progress(
         "iterations.................: {}\n",
         iteration_summary.total
     ));
-    lines.push(format!("\n\n"));
+
+    print(&mut stdout, progress_lines, lines, &worker_states, false).unwrap();
 
     print_workers_summary(&mut stdout, &worker_states)?;
 
