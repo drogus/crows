@@ -23,6 +23,7 @@ impl Executor for ConstantArrivalRateExecutor {
 
         let instant = Instant::now();
         let mut last_time_update = Instant::now();
+        let mut next_run_time = instant.elapsed() + sleep_duration;
         loop {
             let handle = self.runtime.checkout_or_create_instance().await?;
             tokio::spawn(async move {
@@ -30,13 +31,14 @@ impl Executor for ConstantArrivalRateExecutor {
                     eprintln!("An error occurred while running a scenario: {err:?}");
                 }
             });
-            // TODO: at the moment we always sleep for a calculated amount of time
-            // This may be wrong, especially when duration is very low, because
-            // with a very high request rate the time needed to spawn a task may
-            // be substantial enough to delay execution. So technically we should
-            // calculate how much time passed since sending the previous request and
-            // only sleep for the remaining duration
-            tokio::time::sleep(sleep_duration).await;
+
+            let elapsed = instant.elapsed();
+            if next_run_time > elapsed {
+                if let Some(duration) = next_run_time.checked_sub(elapsed) {
+                    tokio::time::sleep(duration).await;
+                }
+            }
+            next_run_time += sleep_duration;
 
             // TODO: wait for all of the allocated instances finish, ie. implement
             // "graceful stop"
