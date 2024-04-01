@@ -25,6 +25,7 @@ pub struct ConstantArrivalRateConfig {
     pub rate: usize,
     pub time_unit: Duration,
     pub allocated_vus: usize,
+    pub graceful_shutdown_timeout: Duration,
 }
 
 impl ExecutorConfig for ConstantArrivalRateConfig {
@@ -53,6 +54,7 @@ impl Default for ConstantArrivalRateConfig {
             rate: Default::default(),
             time_unit: Duration::from_secs(1),
             allocated_vus: Default::default(),
+            graceful_shutdown_timeout: Duration::from_secs(30),
         }
     }
 }

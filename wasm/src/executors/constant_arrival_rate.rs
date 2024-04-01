@@ -3,9 +3,9 @@ use std::time::{Duration, Instant};
 // TODO: I don't really like keeping it in a shared library and not here,
 // but I also don't like the idea of having to depend on the worker in WASM
 // modules
-use crows_shared::ConstantArrivalRateConfig;
-use crate::{Runtime, InfoMessage};
 use super::Executor;
+use crate::{InfoMessage, Runtime};
+use crows_shared::ConstantArrivalRateConfig;
 
 pub struct ConstantArrivalRateExecutor {
     pub config: ConstantArrivalRateConfig,
@@ -15,8 +15,13 @@ pub struct ConstantArrivalRateExecutor {
 // TODO: k6 supports an option to set maximum number of VUs. For now
 // I haven't bothered to implement any limits, but it might be useful for bigger
 // tests maybe?
+// TODO: another way to implement executors like this one is to use
+// tokio_timers or other futures that execute at a given time. With tokio_select
+// it might be more readable than "on the spot" calculations. I think it will
+// be worth trying
 impl Executor for ConstantArrivalRateExecutor {
     async fn run(&mut self) -> anyhow::Result<()> {
+        let graceful_duration = self.config.duration + self.config.graceful_shutdown_timeout;
         let update_duration = Duration::from_millis(500);
         let rate_per_second = self.config.rate as f64 / self.config.time_unit.as_secs_f64();
         let sleep_duration = Duration::from_secs_f64(1.0 / rate_per_second);
@@ -40,22 +45,46 @@ impl Executor for ConstantArrivalRateExecutor {
             }
             next_run_time += sleep_duration;
 
-            // TODO: wait for all of the allocated instances finish, ie. implement
-            // "graceful stop"
             if instant.elapsed() > self.config.duration {
-                if let Err(err) = self.runtime.send_update(InfoMessage::Done) {
-                    eprintln!("Got an error when sending an update: {err:?}");
-                }
-                return Ok(());
+                break;
             }
 
             if last_time_update.elapsed() > update_duration {
-                if let Err(err) = self.runtime.send_update(InfoMessage::TimingUpdate((instant.elapsed(), self.config.duration.checked_sub(instant.elapsed()).unwrap()))) {
+                if let Err(err) = self.runtime.send_update(InfoMessage::TimingUpdate((
+                    instant.elapsed(),
+                    self.config
+                        .duration
+                        .checked_sub(instant.elapsed())
+                        .unwrap_or(Duration::ZERO),
+                ))) {
                     eprintln!("Got an error when sending an update: {err:?}");
                 }
                 last_time_update = Instant::now();
             }
         }
+
+        // wait for graceful shutdown specified time or unless all of the scenarios finished
+        // running
+        loop {
+            if instant.elapsed() > graceful_duration || self.runtime.active_count().await == 0 {
+                break;
+            }
+
+            if let Err(err) = self.runtime.send_update(InfoMessage::TimingUpdate((
+                instant.elapsed(),
+                Duration::ZERO,
+            ))) {
+                eprintln!("Got an error when sending an update: {err:?}");
+            }
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        if let Err(err) = self.runtime.send_update(InfoMessage::Done) {
+            eprintln!("Got an error when sending an update: {err:?}");
+        }
+
+        Ok(())
     }
 
     async fn prepare(&mut self) -> anyhow::Result<()> {
