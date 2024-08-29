@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crows::output::drive_progress;
+use crate::output::drive_progress;
 use crows_wasm::{fetch_config, run_scenario};
 use tokio::sync::mpsc::unbounded_channel;
 

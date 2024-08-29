@@ -7,7 +7,8 @@ use crows_utils::InfoMessage;
 use clap::{Parser, Subcommand};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
-mod commands;
+pub use crows::commands;
+pub use crows::output;
 
 #[derive(Clone)]
 struct ClientService {

@@ -1,4 +1,4 @@
-use crows::output::drive_progress;
+use crate::output::drive_progress;
 use crows_utils::{services::CoordinatorClient, InfoMessage};
 use tokio::sync::mpsc::UnboundedReceiver;
 
