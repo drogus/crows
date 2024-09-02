@@ -519,15 +519,11 @@ impl Instance {
             sender: stderr_sender.clone(),
         };
 
-        let mut wasi_ctx_builder = wasmtime_wasi::WasiCtxBuilder::new()
+        let wasi_ctx = wasmtime_wasi::WasiCtxBuilder::new()
             .stdout(stdout)
-            .stderr(stderr);
-        
-        for (key, value) in env_vars {
-            wasi_ctx_builder = wasi_ctx_builder.env(key, value);
-        }
-
-        let wasi_ctx = wasi_ctx_builder.build();
+            .stderr(stderr)
+            .envs(env_vars.iter().map(|(k, v)| (k.as_str(), v.as_str())))
+            .build();
 
         let host_ctx = WasiHostCtx {
             preview2_ctx: wasi_ctx,
