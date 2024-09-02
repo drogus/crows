@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crows_utils::services::{connect_to_coordinator, RunId};

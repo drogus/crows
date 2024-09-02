@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::output::drive_progress;
 use crows_utils::{services::CoordinatorClient, InfoMessage};
 use tokio::sync::mpsc::UnboundedReceiver;

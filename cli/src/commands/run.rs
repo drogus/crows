@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, collections::HashMap};
 
 use crate::output::drive_progress;
 use crows_wasm::{fetch_config, run_scenario};
@@ -7,7 +7,7 @@ use tokio::sync::mpsc::unbounded_channel;
 pub async fn run(path: &PathBuf) -> anyhow::Result<()> {
     let scenario = std::fs::read(path).unwrap();
     let (runtime, mut info_handle) =
-        crows_wasm::Runtime::new(&scenario).expect("Could not create a runtime");
+        crows_wasm::Runtime::new(&scenario, HashMap::new()).expect("Could not create a runtime");
     let (instance, _, mut store) = runtime
         .new_instance()
         .await

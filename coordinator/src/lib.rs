@@ -111,7 +111,7 @@ impl Coordinator for CoordinatorService {
             .to_owned();
         drop(scenarios);
 
-        let (runtime, _) = crows_wasm::Runtime::new(&scenario)
+        let (runtime, _) = crows_wasm::Runtime::new(&scenario, env_vars.clone())
             .map_err(|err| CoordinatorError::FailedToCreateRuntime(err.to_string()))?;
         let (instance, _, mut store) = runtime
             .new_instance()
@@ -138,12 +138,13 @@ impl Coordinator for CoordinatorService {
             let config = config.clone();
             let id = id.clone();
             let client = worker_entry.client.clone();
+            let env_vars = env_vars.clone();
             tokio::spawn(async move {
                 // TODO: at the moment we split config to split the load between each of the
                 // workers, which means that if a worker dies, we will not get a full test
                 // It would be ideal if we had a way to j
                 // client.start(name.clone(), config.clone()).await;
-                if let Err(err) = client.start(name, config, id, env_vars.clone()).await {
+                if let Err(err) = client.start(name, config, id, env_vars).await {
                     eprintln!("Got an error while trying to execute a scenario: {err:?}");
                 }
             });
