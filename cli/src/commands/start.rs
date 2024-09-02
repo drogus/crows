@@ -6,10 +6,11 @@ pub async fn start(
     coordinator: &mut CoordinatorClient,
     name: &str,
     workers_number: &usize,
+    env_vars: HashMap<String, String>,
     updates_receiver: UnboundedReceiver<(String, InfoMessage)>
 ) -> anyhow::Result<()> {
     let (_, mut worker_names) = coordinator
-        .start(name.to_string(), workers_number.clone())
+        .start(name.to_string(), workers_number.clone(), env_vars)
         .await
         .unwrap()
         .unwrap();

@@ -81,6 +81,7 @@ pub struct Runtime {
     inner: Arc<RwLock<RuntimeInner>>,
     info_sender: UnboundedSender<InfoMessage>,
     length: usize,
+    env_vars: HashMap<String, String>,
 }
 
 impl Drop for InstanceHandle {
@@ -113,7 +114,7 @@ impl Runtime {
         self.length - self.inner.read().await.instances.len()
     }
 
-    pub fn new(content: &Vec<u8>) -> anyhow::Result<(Self, InfoHandle)> {
+    pub fn new(content: &Vec<u8>, env_vars: HashMap<String, String>) -> anyhow::Result<(Self, InfoHandle)> {
         let environment = Environment::new()?;
         let module = Module::from_binary(&environment.engine, content)?;
 
@@ -133,13 +134,14 @@ impl Runtime {
                 })),
                 info_sender,
                 length: 0,
+                env_vars,
             },
             info_handle,
         ))
     }
 
     pub async fn new_instance(&self) -> anyhow::Result<(Instance, InfoHandle, Store<WasiHostCtx>)> {
-        Instance::new(&self.environment, &self.module).await
+        Instance::new(&self.environment, &self.module, &self.env_vars).await
     }
 
     pub async fn reserve_instance(&mut self) -> anyhow::Result<()> {
@@ -484,6 +486,7 @@ pub fn get_memory<T>(caller: &mut Caller<'_, T>) -> anyhow::Result<Memory> {
 impl Instance {
     pub fn new_store(
         engine: &Engine,
+        env_vars: &HashMap<String, String>,
     ) -> anyhow::Result<(wasmtime::Store<WasiHostCtx>, InfoHandle)> {
         let (stdout_sender, mut stdout_receiver) = tokio::sync::mpsc::unbounded_channel();
         let (stderr_sender, mut stderr_receiver) = tokio::sync::mpsc::unbounded_channel();
@@ -516,11 +519,15 @@ impl Instance {
             sender: stderr_sender.clone(),
         };
 
-        let wasi_ctx = wasmtime_wasi::WasiCtxBuilder::new()
+        let mut wasi_ctx_builder = wasmtime_wasi::WasiCtxBuilder::new()
             .stdout(stdout)
-            .stderr(stderr)
-            // .inherit_stdio()
-            .build();
+            .stderr(stderr);
+        
+        for (key, value) in env_vars {
+            wasi_ctx_builder = wasi_ctx_builder.env(key, value);
+        }
+
+        let wasi_ctx = wasi_ctx_builder.build();
 
         let host_ctx = WasiHostCtx {
             preview2_ctx: wasi_ctx,
@@ -548,8 +555,9 @@ impl Instance {
     pub async fn new(
         env: &Environment,
         module: &Module,
+        env_vars: &HashMap<String, String>,
     ) -> anyhow::Result<(Self, InfoHandle, Store<WasiHostCtx>)> {
-        let (mut store, info_handle) = Instance::new_store(&env.engine)?;
+        let (mut store, info_handle) = Instance::new_store(&env.engine, env_vars)?;
         let instance = env.linker.instantiate_async(&mut store, module).await?;
 
         let result = Self { instance };

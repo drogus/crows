@@ -42,6 +42,8 @@ enum Commands {
         name: String,
         #[arg(short, long)]
         workers_number: usize,
+        #[arg(short, long)]
+        env: Vec<String>,
     },
     Run {
         #[arg()]
@@ -82,9 +84,20 @@ pub async fn main() -> anyhow::Result<()> {
         Some(Commands::Start {
             name,
             workers_number,
+            env,
         }) => {
             let (mut coordinator, updates_receiver) = create_coordinator().await?;
-            commands::start(&mut coordinator, name, workers_number, updates_receiver).await?;
+            let env_vars: HashMap<String, String> = env.into_iter()
+                .filter_map(|s| {
+                    let parts: Vec<&str> = s.splitn(2, '=').collect();
+                    if parts.len() == 2 {
+                        Some((parts[0].to_string(), parts[1].to_string()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            commands::start(&mut coordinator, name, workers_number, env_vars, updates_receiver).await?;
         }
         Some(Commands::Workers { command }) => match &command {
             Some(WorkersCommands::List) => {

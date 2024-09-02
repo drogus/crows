@@ -95,6 +95,7 @@ impl Coordinator for CoordinatorService {
         &self,
         name: String,
         workers_number: usize,
+        env_vars: HashMap<String, String>,
     ) -> Result<(RunId, Vec<String>), CoordinatorError> {
         let id = RunId::new();
         // TODO: also this way we will always choose the same workers. in the future we should
@@ -142,7 +143,7 @@ impl Coordinator for CoordinatorService {
                 // workers, which means that if a worker dies, we will not get a full test
                 // It would be ideal if we had a way to j
                 // client.start(name.clone(), config.clone()).await;
-                if let Err(err) = client.start(name, config, id).await {
+                if let Err(err) = client.start(name, config, id, env_vars.clone()).await {
                     eprintln!("Got an error while trying to execute a scenario: {err:?}");
                 }
             });

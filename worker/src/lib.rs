@@ -35,6 +35,7 @@ impl Worker for WorkerService {
         name: String,
         config: crows_shared::Config,
         id: RunId,
+        env_vars: HashMap<String, String>,
     ) -> Result<(), WorkerError> {
         let locked = self.scenarios.read().await;
         let scenario = locked
@@ -43,7 +44,7 @@ impl Worker for WorkerService {
             .clone();
         drop(locked);
 
-        let (runtime, mut info_handle) = Runtime::new(&scenario)
+        let (runtime, mut info_handle) = Runtime::new(&scenario, env_vars)
             .map_err(|err| WorkerError::CouldNotCreateRuntime(err.to_string()))?;
 
         run_scenario(runtime, config).await;

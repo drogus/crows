@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{time::Duration, collections::HashMap};
 
 use crate::{self as utils, InfoMessage};
 use crows_service::service;
@@ -70,6 +70,7 @@ pub trait Coordinator {
     async fn start(
         name: String,
         workers_number: usize,
+        env_vars: HashMap<String, String>,
     ) -> Result<(RunId, Vec<String>), CoordinatorError>;
     async fn list_workers() -> Vec<String>;
 }
@@ -100,6 +101,7 @@ pub trait Worker {
         name: String,
         config: crows_shared::Config,
         run_id: RunId,
+        env_vars: HashMap<String, String>,
     ) -> Result<(), WorkerError>;
     async fn get_data(&self) -> WorkerData;
 }
