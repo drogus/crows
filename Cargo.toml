@@ -45,4 +45,4 @@ crows-service = { path = "service", version = "0.3.0" }
 crows-wasm = { path = "wasm", version = "0.3.0" }
 crows-coordinator = { path = "coordinator", version = "0.3.0" }
 crows-worker = { path = "worker", version = "0.3.0" }
-crows-cli = { path = "cli", version = "0.3.0" }
+crows = { path = "cli", version = "0.3.0" }
