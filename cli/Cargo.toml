@@ -8,7 +8,6 @@ documentation = "https://docs.rs/crows-cli"
 homepage = "https://github.com/drogus/crows"
 repository = "https://github.com/drogus/crows"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [[bin]]
 name = "crows"
 path = "src/main.rs"

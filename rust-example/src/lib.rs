@@ -8,9 +8,9 @@ use std::time::Duration;
 #[config]
 fn config() -> ExecutorConfig {
     let config = ConstantArrivalRateConfig {
-        duration: Duration::from_secs(5),
-        rate: 10,
-        allocated_vus: 10,
+        duration: Duration::from_secs(1),
+        rate: 20,
+        allocated_vus: 1,
         ..Default::default()
     };
     ExecutorConfig::ConstantArrivalRate(config)
@@ -18,9 +18,8 @@ fn config() -> ExecutorConfig {
 
 #[export_name = "scenario"]
 pub fn scenario() {
-    let i: usize = rand::random();
-    println!("log line from a worker, random number: {i}");
+    let server_url = std::env::var("SERVER_URL").unwrap();
     let _ = http_request(
-        "https://google.com".into(), GET, HashMap::new(), "".into(),
+        server_url, GET, HashMap::new(), "".into(),
     );
 }

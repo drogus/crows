@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crows_utils::services::{connect_to_coordinator, RunId};
-use crows_utils::services::{Client, CoordinatorClient};
+use crows::create_coordinator;
 use crows_utils::InfoMessage;
 
 use clap::{Parser, Subcommand};
@@ -10,17 +9,6 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 pub use crows::commands;
 pub use crows::output;
-
-#[derive(Clone)]
-struct ClientService {
-    updates_sender: UnboundedSender<(String, InfoMessage)>,
-}
-
-impl Client for ClientService {
-    async fn update(&self, _: RunId, worker_name: String, info: InfoMessage) {
-        let _= self.updates_sender.send((worker_name, info));
-    }
-}
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -41,7 +29,7 @@ enum Commands {
     Start {
         #[arg(short, long)]
         name: String,
-        #[arg(short, long)]
+
         workers_number: usize,
         #[arg(short, long)]
         env: Vec<String>,
@@ -60,15 +48,6 @@ enum Commands {
 enum WorkersCommands {
     /// List available workers
     List,
-}
-
-async fn create_coordinator() -> anyhow::Result<(CoordinatorClient, UnboundedReceiver<(String, InfoMessage)>)>
-{
-    let (updates_sender, updates_receiver) = unbounded_channel();
-    let url = std::env::var("CROWS_COORDINATOR_URL").unwrap_or("127.0.0.1:8282".to_string());
-    let coordinator =
-        connect_to_coordinator(url, |_| async { Ok(ClientService { updates_sender }) }).await?;
-    Ok((coordinator, updates_receiver))
 }
 
 #[tokio::main]
