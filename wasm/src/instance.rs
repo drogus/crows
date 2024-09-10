@@ -1,8 +1,22 @@
+use lazy_static::lazy_static;
 use anyhow::Result;
 use std::collections::HashMap;
+use std::sync::Arc;
 use wasmtime::{Engine, Instance as WasmtimeInstance, Memory, MemoryType, Module, Store};
-use crate::{Environment, InfoHandle, RemoteIo, WasiHostCtx};
+use crate::{Environment, InfoHandle, RemoteIo, WasiHostCtx, get_memory};
 use crows_utils::InfoMessage;
+use crate::http_client::Client;
+use hyper_rustls::ConfigBuilderExt;
+
+// TODO: In the future I want the TLS settings to be configurable
+lazy_static! {
+    static ref TLS_CONFIG: Arc<rustls::ClientConfig> = Arc::new(
+            rustls::ClientConfig::builder()
+                .with_native_roots()
+                .unwrap()
+                .with_no_client_auth()
+        );
+}
 
 pub struct Instance {
     pub instance: WasmtimeInstance,
@@ -50,13 +64,17 @@ impl Instance {
             .envs(&env_vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<(_, _)>>())
             .build();
 
+        let tls_config = TLS_CONFIG.clone();
+
+        let client = Client::new(tls_config);
+
         let host_ctx = WasiHostCtx {
             preview2_ctx: wasi_ctx,
             preview2_table: wasmtime::component::ResourceTable::new(),
             preview1_adapter: wasmtime_wasi::preview1::WasiPreview1Adapter::new(),
             buffers: slab::Slab::default(),
             memory: None,
-            client: reqwest::Client::new(),
+            client,
             request_info_sender,
             stderr_sender,
         };
@@ -83,5 +101,11 @@ impl Instance {
 
         let result = Self { instance };
         Ok((result, info_handle, store))
+    }
+
+    pub async fn clear_connections(&mut self, mut store: &mut Store<WasiHostCtx>) {
+        let memory = self.instance.get_export(&mut store, "memory").unwrap().into_memory().unwrap();
+        let (_, store) = memory.data_and_store_mut(&mut store);
+        store.client.clear_connections();
     }
 }

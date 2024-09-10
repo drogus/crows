@@ -16,8 +16,7 @@ members = [
 [workspace.package]
 version = "0.3.0"
 edition = "2021"
-# update rust-toolchain.toml too!
-rust-version = "1.76.0"
+rust-version = "1.81.0"
 
 [workspace.dependencies]
 tokio = { version = "1.20", features = ["full"] }
@@ -46,3 +45,8 @@ crows-wasm = { path = "wasm", version = "0.3.0" }
 crows-coordinator = { path = "coordinator", version = "0.3.0" }
 crows-worker = { path = "worker", version = "0.3.0" }
 crows = { path = "cli", version = "0.3.0" }
+hyper = { version = "1.0", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+rustls = { version = "0.23", features = ["ring","logging","tls12"], default-features = false }
+tokio-rustls = "0.26"
+rustls-pki-types = "1.8.0"

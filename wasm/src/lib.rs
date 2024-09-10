@@ -3,19 +3,14 @@ mod instance;
 mod remote_io;
 mod runtime;
 mod wasi_host_ctx;
+mod http_client;
 
 use anyhow::anyhow;
-use crows_bindings::{HTTPError, HTTPMethod, HTTPRequest, HTTPResponse};
 use crows_shared::Config;
-use crows_utils::services::{IterationInfo, RequestInfo, RunId};
+use crows_utils::services::RunId;
 use crows_utils::{InfoHandle, InfoMessage};
 use executors::Executors;
-use reqwest::header::{HeaderName, HeaderValue};
-use reqwest::{Body, Request, Url};
-use serde_json::{from_slice, to_vec};
-use std::collections::HashMap;
-use std::str::FromStr;
-use tokio::time::Instant;
+use serde_json::from_slice;
 use wasmtime::{Caller, Memory, Store};
 
 pub mod executors;
@@ -53,6 +48,8 @@ pub async fn run_wasm(
             eprintln!("Problem when sending logs to worker: {e:?}");
         }
     }
+
+    instance.clear_connections(&mut store);
 
     Ok(())
 }
