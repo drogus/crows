@@ -1,21 +1,17 @@
 use anyhow::{anyhow, Result};
-use crows_bindings::{HTTPError, HTTPMethod, HTTPRequest, HTTPResponse};
+use crows_bindings::{HTTPError, HTTPRequest, HTTPResponse};
 use crows_utils::services::RequestInfo;
 use futures::Future;
-use reqwest::header::{HeaderName, HeaderValue};
-use reqwest::{Body, Request, Url};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{from_slice, to_vec};
-use std::collections::HashMap;
 use std::pin::Pin;
-use std::str::FromStr;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::time::Instant;
 use wasmtime::{Caller, Memory};
 use wasmtime_wasi::preview1::WasiPreview1Adapter;
 
 use crate::get_memory;
+use crate::http_client::Client;
 
 pub struct WasiHostCtx {
     pub preview2_ctx: wasmtime_wasi::WasiCtx,
@@ -23,7 +19,7 @@ pub struct WasiHostCtx {
     pub preview1_adapter: WasiPreview1Adapter,
     pub memory: Option<Memory>,
     pub buffers: slab::Slab<Box<[u8]>>,
-    pub client: reqwest::Client,
+    pub client: Client,
     pub request_info_sender: UnboundedSender<RequestInfo>,
     pub stderr_sender: UnboundedSender<Vec<u8>>,
 }
@@ -97,71 +93,11 @@ impl WasiHostCtx {
             let memory = get_memory(&mut caller).unwrap();
             let (_, store) = memory.data_and_store_mut(&mut caller);
 
-            let client = &store.client;
+            let (http_response, request_info) = store.client.http_request(request).await.map_err(|e| { println!("Error: {e:?}"); e})?;
 
-            let method = match request.method {
-                HTTPMethod::HEAD => reqwest::Method::HEAD,
-                HTTPMethod::GET => reqwest::Method::GET,
-                HTTPMethod::POST => reqwest::Method::POST,
-                HTTPMethod::PUT => reqwest::Method::PUT,
-                HTTPMethod::DELETE => reqwest::Method::DELETE,
-                HTTPMethod::OPTIONS => reqwest::Method::OPTIONS,
-            };
-            let url = Url::parse(&request.url).map_err(|err| HTTPError {
-                message: format!("Error when parsing the URL: {err:?}"),
-            })?;
+            let _ = store.request_info_sender.send(request_info);
 
-            let mut reqw_req = Request::new(method, url);
-
-            for (key, value) in request.headers {
-                let name = HeaderName::from_str(&key).map_err(|err| HTTPError {
-                    message: format!("Invalid header name: {key}: {err:?}"),
-                })?;
-                let value = HeaderValue::from_str(&value).map_err(|err| HTTPError {
-                    message: format!("Invalid header value: {value}: {err:?}"),
-                })?;
-                reqw_req.headers_mut().insert(name, value);
-            }
-
-            *reqw_req.body_mut() = request.body.map(|b| Body::from(b));
-
-            let instant = Instant::now();
-            let response = client.execute(reqw_req).await.map_err(|err| {
-                let _ = store.request_info_sender.send(RequestInfo {
-                    latency: instant.elapsed(),
-                    successful: false,
-                });
-
-                HTTPError {
-                    message: format!("Error when sending a request: {err:?}"),
-                }
-            })?;
-            let latency = instant.elapsed();
-
-            let mut headers = HashMap::new();
-            for (name, value) in response.headers().iter() {
-                let value = value.to_str().map_err(|err| HTTPError {
-                    message: format!("Could not parse response header {value:?}: {err:?}"),
-                })?;
-                headers.insert(name.to_string(), value.to_string());
-            }
-
-            let status = response.status().as_u16();
-            let successful = response.status().is_success();
-            let body = response.text().await.map_err(|err| HTTPError {
-                message: format!("Problem with fetching the body: {err:?}"),
-            })?;
-
-            let _ = store.request_info_sender.send(RequestInfo {
-                latency,
-                successful,
-            });
-
-            Ok(HTTPResponse {
-                headers,
-                body,
-                status,
-            })
+            Ok(http_response)
         })
     }
 

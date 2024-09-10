@@ -11,7 +11,15 @@ repository = "https://github.com/drogus/crows"
 [dependencies]
 slab = "0.4"
 async-trait = "0.1"
-reqwest = "0.11"
+hyper = { version = "1.4", features = ["full"] }
+url = "2.5"
+hyper-util = "0.1"
+http-body-util = "0.1"
+tower-service = "0.3"
+hyper-rustls = { version = "0.27", features = ["http1", "http2"]}
+http = "1.1.0"
+lazy_static = "1.5"
+pin-project-lite = "0.2"
 
 tokio.workspace = true
 anyhow.workspace = true
@@ -27,3 +35,10 @@ serde_json.workspace = true
 crows-shared.workspace = true
 crows-utils.workspace = true
 crows-bindings.workspace = true
+rustls.workspace = true
+tokio-rustls.workspace = true
+rustls-pki-types.workspace = true
+
+[dev-dependencies]
+mockito = "1.5"
+wiremock = "0.6"

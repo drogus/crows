@@ -1,4 +1,10 @@
 use anyhow::Result;
+use axum::{
+    routing::get,
+    Router,
+    http::StatusCode,
+    response::IntoResponse,
+};
 use crows_shared::{Config, ConstantArrivalRateConfig};
 use crows_utils::services::{connect_to_coordinator, CoordinatorClient};
 use crows_utils::InfoMessage;
@@ -6,8 +12,6 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 
 #[tokio::main]
@@ -18,28 +22,26 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+    use axum::extract::State;
 
     use super::*;
 
     async fn start_http_server(request_count: Arc<Mutex<usize>>) -> Result<()> {
-        let listener = TcpListener::bind("127.0.0.1:8080").await?;
-        println!("HTTP server listening on {}", listener.local_addr()?);
+        let app = Router::new()
+            .route("/", get(handler))
+            .with_state(request_count);
 
-        loop {
-            let (mut stream, _) = listener.accept().await?;
-            let request_count = Arc::clone(&request_count);
+        let listener = tokio::net::TcpListener::bind("0.0.0.0:8998").await.unwrap();
+        axum::serve(listener, app).await.unwrap();
 
-            tokio::spawn(async move {
-                let mut buf = [0; 1024];
-                let _ = stream.read(&mut buf).await;
+        Ok(())
+    }
 
-                let response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK";
-                let _ = stream.write_all(response.as_bytes()).await;
-
-                let mut count = request_count.lock().await;
-                *count += 1;
-            });
-        }
+    async fn handler(State(request_count): State<Arc<Mutex<usize>>>) -> impl IntoResponse {
+        let mut count = request_count.lock().await;
+        *count += 1;
+        
+        (StatusCode::OK, "OK")
     }
 
     async fn create_coordinator(
@@ -74,14 +76,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_distributed_stress_test() -> Result<()> {
+        rustls::crypto::ring::default_provider()
+            .install_default().unwrap();
+
         // Start the coordinator
         let coordinator_addr = start_coordinator().await?;
 
         // Start two workers
         start_worker(coordinator_addr, "worker1").await?;
         start_worker(coordinator_addr, "worker2").await?;
+
         // TODO: implement a way to wait till workers are fully connected
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
 
         // Start the HTTP server
         let request_count = Arc::new(Mutex::new(0));
@@ -102,7 +108,7 @@ mod tests {
         // Start scenario
         let workers_number = 2;
         let mut env_vars = HashMap::new();
-        env_vars.insert("SERVER_URL".into(), "http://127.0.0.1:8080".into());
+        env_vars.insert("SERVER_URL".into(), "http://127.0.0.1:8998".into());
         let (run_id, worker_names) = coordinator
             .start(scenario_name.to_string(), workers_number, env_vars)
             .await??;

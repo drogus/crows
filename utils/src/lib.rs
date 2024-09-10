@@ -356,55 +356,65 @@ pub trait ClientTrait {
 ///
 /// So if we could define all of it in one file it would be something like:
 ///
-///     trait Worker {
-///         async fn ping(&self) -> String;
-///     }
+/// ```rust,ignore
+/// trait Worker {
+///     async fn ping(&self) -> String;
+/// }
 ///
-///     struct WorkerService {}
+/// struct WorkerService {}
 ///
-///     impl Worker for WorkerService {
-///         async fn ping(&self) -> String { todo!() }
-///     }
+/// impl Worker for WorkerService {
+///     async fn ping(&self) -> String { todo!() }
+/// }
 ///
-///     impl Service for WorkrService {
-///         type Request = WorkerRequest;
-///         type Response = WorkerResponse;
+/// impl Service for WorkrService {
+///     type Request = WorkerRequest;
+///     type Response = WorkerResponse;
 ///
-///         fn handle_request(...) { .... }
-///     }
+///     fn handle_request(...) { .... }
+/// }
+/// ```
 ///
 /// The problem is, we don't want to require implementation of the service to live
 /// in the same place where the definition lives. That's why it's better to only
 /// implement Service for a generic type and thus allow for it to be applied
 /// only when the type is actually created, for example:
 ///
-///     impl<T> Service for T
-///     where T: Worker + Send + Sync { }
+/// ```rust,ignore
+/// impl<T> Service for T
+/// where T: Worker + Send + Sync { }
+/// ```
 ///
 /// The issue here is that this results in a "conflicting implementation" error if
 /// there is more than one `impl` of this type present. The reason is future proofing.
 /// For example consider the previous impl and another one for another service
 ///
-///     impl<T> Service for T
-///     where T: Coordinator + Send + Sync { }
+/// ```rust,ignore
+/// impl<T> Service for T
+/// where T: Coordinator + Send + Sync { }
+/// ```
 ///
 /// While we know that we don't want to implement both `Coordinator` and `Worker`
 /// traits on the same type, Rust doesn't. The solution is to add a "dummy type"
 /// to the service implementation and thus narrow down the impl to a specific generic
 /// type, for example:
 ///
-///     struct DummyWorkerService {}
+/// ```rust,ignore
+/// struct DummyWorkerService {}
 ///
-///     impl<T> Service<DummyWorkerService> for T
-///     where T: Worker + Send + Sync { }
+/// impl<T> Service<DummyWorkerService> for T
+/// where T: Worker + Send + Sync { }
+/// ```
 ///
 /// Now the impl is only considered for a specific Service type and the only
 /// additional requirement is that now we have to include the dummy type when
 /// specifycing the service, for example if we accept the Worker service as an
 /// argument we say:
 ///
-///     fn foo<T>(service: T)
-///         where T: Service<DummyWorkerService> { }
+/// ```rust,ignore
+/// fn foo<T>(service: T)
+///     where T: Service<DummyWorkerService> { }
+/// ```
 ///
 pub trait Service<DummyType>: Send + Sync {
     type Response: Send + Serialize;

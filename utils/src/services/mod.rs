@@ -85,6 +85,14 @@ pub struct WorkerData {
 pub struct RequestInfo {
     pub latency: Duration,
     pub successful: bool,
+    pub status: u16,
+    pub tls_handshake_time: Option<Duration>,
+    pub connecting_time: Option<Duration>,
+    pub response_time: Duration,
+    pub bytes_sent: u64,
+    pub bytes_received: u64,
+    pub time_to_first_byte: Duration,
+    pub send_time: Duration,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

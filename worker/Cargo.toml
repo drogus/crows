@@ -30,3 +30,4 @@ crows-utils.workspace = true
 crows-wasm.workspace = true
 crows-service.workspace = true
 crows-shared.workspace = true
+rustls.workspace = true

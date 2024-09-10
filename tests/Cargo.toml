@@ -5,10 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-tokio = { version = "1.20", features = ["full"] }
-anyhow = "1.0"
-crows-coordinator = { workspace = true }
-crows-worker = { workspace = true }
-crows-utils = { workspace = true }
-crows-shared = { workspace = true }
+tokio.workspace = true
+anyhow.workspace = true
+crows-coordinator.workspace = true
+crows-worker.workspace = true
+crows-utils.workspace = true
+crows-shared.workspace = true
 crows.workspace = true
+rustls.workspace = true
+axum = "0.7"
