@@ -44,7 +44,7 @@ There are a lot of tools for stress testing available on the market. Why have I 
   It might be a skill issue, but it's not the worst reason to start a project I guess
 * I'm very excited by the concept of using WASM on the backend for several reasons and I think
   it's interesting to try it out in context of load testing
-* I think a notion of using your favourite programming language for writing stress tests while being able to
+* I think the notion of using your favourite programming language for writing stress tests while being able to
   reuse the foundation is very tempting. Of course most programmers will be able to write a Javascript load
   test even if they mostly use Ruby or Python in their day job, but isn't it nice to not have to switch languages?
   * if anyone is wondering why I mention dynamic languages that don't directly compile to WebAssembly - it is
