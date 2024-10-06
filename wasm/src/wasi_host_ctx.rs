@@ -5,18 +5,17 @@ use futures::Future;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{from_slice, to_vec};
+use wasmtime_wasi::preview1::WasiP1Ctx;
 use std::pin::Pin;
 use tokio::sync::mpsc::UnboundedSender;
 use wasmtime::{Caller, Memory};
-use wasmtime_wasi::preview1::WasiPreview1Adapter;
 
 use crate::get_memory;
 use crate::http_client::Client;
 
 pub struct WasiHostCtx {
-    pub preview2_ctx: wasmtime_wasi::WasiCtx,
+    pub preview2_ctx: WasiP1Ctx,
     pub preview2_table: wasmtime::component::ResourceTable,
-    pub preview1_adapter: WasiPreview1Adapter,
     pub memory: Option<Memory>,
     pub buffers: slab::Slab<Box<[u8]>>,
     pub client: Client,
@@ -144,25 +143,5 @@ impl WasiHostCtx {
             .copy_from_slice(&buffer);
 
         Ok(())
-    }
-}
-
-impl wasmtime_wasi::WasiView for WasiHostCtx {
-    fn table(&mut self) -> &mut wasmtime::component::ResourceTable {
-        &mut self.preview2_table
-    }
-
-    fn ctx(&mut self) -> &mut wasmtime_wasi::WasiCtx {
-        &mut self.preview2_ctx
-    }
-}
-
-impl wasmtime_wasi::preview1::WasiPreview1View for WasiHostCtx {
-    fn adapter(&self) -> &WasiPreview1Adapter {
-        &self.preview1_adapter
-    }
-
-    fn adapter_mut(&mut self) -> &mut WasiPreview1Adapter {
-        &mut self.preview1_adapter
     }
 }
