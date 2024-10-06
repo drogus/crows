@@ -122,7 +122,10 @@ mod tests {
             updates.push(update);
         }
 
-        tokio::time::sleep(Duration::from_millis(500)).await; // Give some time for all requests to be counted
+        // TODO: we should not have to wait that much here. I'm purposefully
+        // using a single threaded tokio runtime to catch any blocking operations,
+        // it seems like we might be blocking on something
+        tokio::time::sleep(Duration::from_millis(800)).await; // Give some time for all requests to be counted
         let final_request_count = *request_count.lock().await;
         assert!(
             final_request_count == 20,

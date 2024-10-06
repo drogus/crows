@@ -62,7 +62,7 @@ impl Instance {
             .stdout(stdout)
             .stderr(stderr)
             .envs(&env_vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect::<Vec<(_, _)>>())
-            .build();
+            .build_p1();
 
         let tls_config = TLS_CONFIG.clone();
 
@@ -71,7 +71,6 @@ impl Instance {
         let host_ctx = WasiHostCtx {
             preview2_ctx: wasi_ctx,
             preview2_table: wasmtime::component::ResourceTable::new(),
-            preview1_adapter: wasmtime_wasi::preview1::WasiPreview1Adapter::new(),
             buffers: slab::Slab::default(),
             memory: None,
             client,

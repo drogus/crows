@@ -22,7 +22,7 @@ impl Environment {
             .func_wrap("crows", "consume_buffer", WasiHostCtx::consume_buffer)
             .unwrap();
         linker
-            .func_wrap2_async("crows", "http", |caller, ptr, len| {
+            .func_wrap_async("crows", "http", |caller, (ptr, len): (u32, u32)| {
                 Box::new(async move {
                     WasiHostCtx::wrap_async(caller, ptr, len, WasiHostCtx::http).await
                 })
@@ -32,7 +32,7 @@ impl Environment {
             .func_wrap("crows", "set_config", WasiHostCtx::set_config)
             .unwrap();
 
-        wasmtime_wasi::preview1::add_to_linker_async(&mut linker, |t| t)?;
+        wasmtime_wasi::preview1::add_to_linker_async(&mut linker, |t| &mut t.preview2_ctx)?;
 
         Ok(Self { engine, linker })
     }
