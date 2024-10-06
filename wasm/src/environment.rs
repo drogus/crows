@@ -11,6 +11,7 @@ pub struct Environment {
 impl Environment {
     pub fn new() -> Result<Self> {
         let mut config = wasmtime::Config::new();
+        config.wasm_component_model(true);
         config.async_support(true);
         config.consume_fuel(true);
 

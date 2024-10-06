@@ -267,6 +267,7 @@ impl Client {
         })?;
 
         let addr = format!("{}:{}", host, port);
+        // DNS resolution is a blocking operation in tokio
         let socket_addr = tokio::task::spawn_blocking(move || addr.to_socket_addrs()).await
             .map_err(|err| HTTPError {
                 message: format!("Failed to resolve domain: {err:?}"),

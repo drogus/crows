@@ -79,11 +79,13 @@ impl Instance {
         };
         let mut store: Store<WasiHostCtx> = Store::new(engine, host_ctx);
 
+        // TODO: we should limit memory to not allow too noisy neighbours
         let memory = Memory::new(&mut store, MemoryType::new(1, None)).unwrap();
         store.data_mut().memory = Some(memory);
 
         // WebAssembly execution will be paused for an async yield every time it
         // consumes 10000 fuel. Fuel will be refilled u64::MAX times.
+        // TODO: test it in practice with CPU bound WASM
         store.fuel_async_yield_interval(Some(10000))?;
         store.set_fuel(u64::MAX).unwrap();
 
