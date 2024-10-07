@@ -1,0 +1,68 @@
+package local:crows;
+
+interface types {
+    /// Represents a duration in nanoseconds
+    type duration = u64;
+
+    /// Configuration for constant arrival rate
+    record constant-arrival-rate-config {
+        duration: duration,
+        rate: u64,
+        time-unit: duration,
+        allocated-vus: u64,
+        graceful-shutdown-timeout: duration,
+    }
+
+    /// Configuration variants
+    variant config {
+        constant-arrival-rate(constant-arrival-rate-config),
+    }
+
+    /// HTTP methods
+    enum http-method {
+        get,
+        post,
+        put,
+        delete,
+        patch,
+        head,
+        options,
+        trace,
+    }
+
+    /// Represents an HTTP request
+    record request {
+        method: http-method,
+        uri: string,
+        headers: list<tuple<string, string>>,
+        body: option<string>,
+    }
+
+    /// Represents an HTTP response
+    record response {
+        status: u16,
+        headers: list<tuple<string, string>>,
+        body: list<u8>,
+    }
+
+    /// Represents an HTTP error
+    record http-error {
+        message: string,
+    }
+}
+
+
+
+world crows {
+    use types.{config};
+
+    /// Host interface
+    import host: interface {
+        use types.{request,response,http-error,http-method};
+
+        http-request: func(req: request) -> result<response, http-error>;
+    }
+    
+    export get-config: func() -> config;
+    export run-scenario: func();
+}

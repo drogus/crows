@@ -1,10 +1,10 @@
 use anyhow::Result;
-use crows_bindings::{HTTPError, HTTPMethod, HTTPRequest, HTTPResponse};
+use crate::{HTTPError, HTTPMethod, HTTPRequest, HTTPResponse};
 use crows_utils::services::RequestInfo;
 use http_body_util::BodyExt;
+use hyper_rustls::ConfigBuilderExt;
 use hyper::body::{Body, Incoming as IncomingBody};
 use hyper::{Request, Response};
-use hyper_rustls::ConfigBuilderExt;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use rustls::pki_types::ServerName;
 use rustls::ClientConfig;
@@ -180,9 +180,11 @@ impl Client {
             HTTPMethod::HEAD => hyper::Method::HEAD,
             HTTPMethod::GET => hyper::Method::GET,
             HTTPMethod::POST => hyper::Method::POST,
+            HTTPMethod::PATCH => hyper::Method::PATCH,
             HTTPMethod::PUT => hyper::Method::PUT,
             HTTPMethod::DELETE => hyper::Method::DELETE,
             HTTPMethod::OPTIONS => hyper::Method::OPTIONS,
+            HTTPMethod::TRACE => hyper::Method::TRACE,
         };
 
         let mut req_builder = Request::builder().method(method).uri(request.url);
@@ -249,7 +251,7 @@ impl Client {
 
         let http_response = HTTPResponse {
             headers,
-            body: String::from_utf8_lossy(&body).to_string(),
+            body: body.to_vec(),
             status,
         };
 
@@ -412,7 +414,7 @@ mod tests {
 
         let (response, request_info) = result.unwrap();
         assert_eq!(response.status, 200);
-        assert_eq!(response.body, "Hello, World!");
+        assert_eq!(String::from_utf8(response.body).unwrap(), "Hello, World!");
         assert!(response.headers.contains_key("content-type"));
         assert_eq!(response.headers["content-type"], "text/plain");
 

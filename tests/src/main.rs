@@ -100,7 +100,7 @@ mod tests {
         // Upload scenario
         let scenario_name = "test_scenario";
         let scenario_content =
-            include_bytes!("../../rust-example/target/wasm32-wasi/release/wasm_example.wasm");
+            include_bytes!("../../rust-example/target/wasm32-wasip1/debug/wasm_example.wasm");
         coordinator
             .upload_scenario(scenario_name.to_string(), scenario_content.to_vec())
             .await??;
@@ -122,10 +122,9 @@ mod tests {
             updates.push(update);
         }
 
-        // TODO: we should not have to wait that much here. I'm purposefully
-        // using a single threaded tokio runtime to catch any blocking operations,
-        // it seems like we might be blocking on something
-        tokio::time::sleep(Duration::from_millis(800)).await; // Give some time for all requests to be counted
+        // If this fails, it probably means that we're running a blocking operation on a
+        // non-blocking thread. This test is running on a single threaded runtime on purpose,
+        // so if anything is taking significant time, it will most probably fail.
         let final_request_count = *request_count.lock().await;
         assert!(
             final_request_count == 20,

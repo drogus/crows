@@ -8,7 +8,6 @@ members = [
     "service",
     "worker",
     "wasm",
-    "bindings",
     "shared",
     "tests",
 ]
@@ -38,7 +37,6 @@ bytes = "1.5"
 rational = "1.5"
 crows-macros = { path = "macros", version = "0.3.0" }
 crows-shared = { path = "shared", version = "0.3.0" }
-crows-bindings = { path = "bindings", version = "0.3.0" }
 crows-utils = { path = "utils", version = "0.3.0" }
 crows-service = { path = "service", version = "0.3.0" }
 crows-wasm = { path = "wasm", version = "0.3.0" }

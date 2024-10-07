@@ -44,8 +44,14 @@ impl Worker for WorkerService {
             .clone();
         drop(locked);
 
-        let (runtime, mut info_handle) = Runtime::new(&scenario, env_vars)
-            .map_err(|err| WorkerError::CouldNotCreateRuntime(err.to_string()))?;
+        let (runtime, mut info_handle) = tokio::task::spawn_blocking(move || {
+            Runtime::new(&scenario, env_vars)
+                .map_err(|err| WorkerError::CouldNotCreateRuntime(err.to_string()))
+        })
+        .await
+        .map_err(|e| {
+            WorkerError::CouldNotCreateRuntime(e.to_string())
+        })??;
 
         run_scenario(runtime, config).await;
 
@@ -74,7 +80,10 @@ impl Worker for WorkerService {
     }
 }
 
-pub async fn connect_to_coordinator(coordinator_address: String, hostname: String) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn connect_to_coordinator(
+    coordinator_address: String,
+    hostname: String,
+) -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting with hostname: {hostname}");
     // let handles: Vec<RuntimeHandle> = Default::default();
     let scenarios: ScenariosList = Default::default();
@@ -120,5 +129,4 @@ pub async fn connect_to_coordinator(coordinator_address: String, hostname: Strin
             sleep(Duration::from_secs(1)).await;
         }
     }
-
 }
