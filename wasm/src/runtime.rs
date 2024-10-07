@@ -1,10 +1,18 @@
+use anyhow::Result;
+use crate::{HTTPMethod, HTTPRequest};
+use crows_utils::services::RequestInfo;
+use local::crows::types::HttpMethod;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use anyhow::Result;
 use tokio::sync::{mpsc::UnboundedSender, oneshot, RwLock};
 use tokio::time::Instant;
-use wasmtime::Module;
+use wasmtime::InstancePre;
+use wasmtime::{
+    component::{bindgen, Component},
+    Module,
+};
 
+use crate::http_client::Client;
 use crate::{Environment, Instance, WasiHostCtx};
 use crows_utils::{InfoHandle, InfoMessage};
 
@@ -40,7 +48,9 @@ impl InstanceHandle {
             .write()
             .await
             .info_sender
-            .send(InfoMessage::IterationInfo(crows_utils::services::IterationInfo { latency }))?;
+            .send(InfoMessage::IterationInfo(
+                crows_utils::services::IterationInfo { latency },
+            ))?;
         Ok(())
     }
 }
@@ -52,7 +62,7 @@ pub struct RuntimeInner {
 
 pub struct Runtime {
     pub environment: Environment,
-    pub module: Module,
+    pub component_pre: CrowsPre<WasiHostCtx>,
     pub inner: Arc<RwLock<RuntimeInner>>,
     pub info_sender: UnboundedSender<InfoMessage>,
     pub length: usize,
@@ -74,6 +84,71 @@ impl Drop for InstanceHandle {
     }
 }
 
+bindgen!({
+    world: "crows",
+    path: "crows.wit",
+    async: true,
+});
+
+pub struct HostComponent {
+    client: Client,
+    request_info_sender: UnboundedSender<RequestInfo>,
+}
+
+impl HostComponent {
+    pub fn new(client: Client, request_info_sender: UnboundedSender<RequestInfo>) -> Self {
+        Self {
+            client,
+            request_info_sender,
+        }
+    }
+
+    pub fn clear_connections(&mut self) {
+        self.client.clear_connections();
+    }
+}
+
+#[async_trait::async_trait]
+impl host::Host for HostComponent {
+    async fn http_request(
+        &mut self,
+        request: host::Request,
+    ) -> std::result::Result<host::Response, host::HttpError> {
+        let method = match request.method {
+            HttpMethod::Get => HTTPMethod::GET,
+            HttpMethod::Post => HTTPMethod::POST,
+            HttpMethod::Put => HTTPMethod::PUT,
+            HttpMethod::Delete => HTTPMethod::DELETE,
+            HttpMethod::Patch => HTTPMethod::PATCH,
+            HttpMethod::Head => HTTPMethod::HEAD,
+            HttpMethod::Options => HTTPMethod::OPTIONS,
+            HttpMethod::Trace => HTTPMethod::TRACE,
+        };
+
+        let request = HTTPRequest {
+            url: request.uri,
+            method,
+            headers: request.headers.into_iter().map(|(k, v)| (k, v)).collect(),
+            body: request.body,
+        };
+        let (http_response, request_info) = self
+            .client
+            .http_request(request)
+            .await
+            .map_err(|e| host::HttpError { message: e.message })?;
+
+        let _ = self.request_info_sender.send(request_info);
+
+        let response = host::Response {
+            status: http_response.status,
+            headers: http_response.headers.into_iter().collect(),
+            body: http_response.body,
+        };
+
+        Ok(response)
+    }
+}
+
 impl Runtime {
     pub fn send_update(&self, update: InfoMessage) -> Result<()> {
         Ok(self.info_sender.send(update)?)
@@ -89,7 +164,9 @@ impl Runtime {
 
     pub fn new(content: &Vec<u8>, env_vars: HashMap<String, String>) -> Result<(Self, InfoHandle)> {
         let environment = Environment::new()?;
-        let module = Module::from_binary(&environment.engine, content)?;
+        let component = Component::from_binary(&environment.engine, content.as_slice())?;
+        let pre = environment.linker.instantiate_pre(&component)?;
+        let crows_pre = CrowsPre::new(pre)?;
 
         let (info_sender, info_receiver) = tokio::sync::mpsc::unbounded_channel();
 
@@ -99,7 +176,7 @@ impl Runtime {
 
         Ok((
             Self {
-                module,
+                component_pre: crows_pre,
                 environment,
                 inner: Arc::new(RwLock::new(RuntimeInner {
                     instances: VecDeque::new(),
@@ -113,8 +190,10 @@ impl Runtime {
         ))
     }
 
-    pub async fn new_instance(&self) -> Result<(Instance, InfoHandle, wasmtime::Store<WasiHostCtx>)> {
-        Instance::new(&self.environment, &self.module, &self.env_vars).await
+    pub async fn new_instance(
+        &self,
+    ) -> Result<(Instance, InfoHandle, wasmtime::Store<WasiHostCtx>)> {
+        Instance::new(&self.environment, &self.component_pre, &self.env_vars).await
     }
 
     pub async fn reserve_instance(&mut self) -> Result<()> {
@@ -126,7 +205,7 @@ impl Runtime {
         let handle = InstanceHandle { inner: Some(inner) };
 
         let (instance, mut info_handle, store) =
-            Instance::new(&self.environment, &self.module, &self.env_vars).await?;
+            Instance::new(&self.environment, &self.component_pre, &self.env_vars).await?;
 
         let info_sender = self.info_sender.clone();
         tokio::spawn(async move {

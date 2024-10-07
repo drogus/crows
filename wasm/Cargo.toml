@@ -20,6 +20,7 @@ hyper-rustls = { version = "0.27", features = ["http1", "http2"]}
 http = "1.1.0"
 lazy_static = "1.5"
 pin-project-lite = "0.2"
+wit-component = "0.218.0"
 
 tokio.workspace = true
 anyhow.workspace = true
@@ -34,7 +35,6 @@ serde.workspace = true
 serde_json.workspace = true
 crows-shared.workspace = true
 crows-utils.workspace = true
-crows-bindings.workspace = true
 rustls.workspace = true
 tokio-rustls.workspace = true
 rustls-pki-types.workspace = true
