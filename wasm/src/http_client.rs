@@ -1,5 +1,4 @@
 use anyhow::Result;
-use crate::{HTTPError, HTTPMethod, HTTPRequest, HTTPResponse};
 use crows_utils::services::RequestInfo;
 use http_body_util::BodyExt;
 use hyper_rustls::ConfigBuilderExt;
@@ -145,19 +144,13 @@ impl Client {
 
     pub async fn http_request(
         &mut self,
-        request: HTTPRequest,
-    ) -> Result<(HTTPResponse, RequestInfo), HTTPError> {
+        request: http::Request,
+    ) -> Result<(http::Response, RequestInfo)> {
         let start = Instant::now();
-        let url = Url::parse(&request.url).map_err(|err| HTTPError {
-            message: format!("Error when parsing the URL: {err:?}"),
-        })?;
+        let url = Url::parse(request.uri().as_str()).map_err(|err| anyhow::anyhow!("Error when parsing the URL: {err:?}"))?;
 
-        let host = url.host_str().ok_or_else(|| HTTPError {
-            message: "No host in URL".to_string(),
-        })?;
-        let port = url.port_or_known_default().ok_or_else(|| HTTPError {
-            message: "Unable to determine port".to_string(),
-        })?;
+        let host = url.host_str().ok_or_else(|| anyhow::anyhow!("No host in URL"))?;
+        let port = url.port_or_known_default().ok_or_else(|| anyhow::anyhow!("Unable to determine port"))?;
 
         let mut tls_handshake_time = None;
         let mut connecting_time = None;
@@ -167,8 +160,6 @@ impl Client {
             Some(sender) if !sender.is_closed() => sender,
             _ => {
                 let sender = self.create_connection(&url, host, port).await?;
-                // only set the tls_handshake time for new connections as existing connections
-                // already had a TLS handshake reported
                 tls_handshake_time = sender.tls_handshake_time;
                 connecting_time = Some(sender.connecting_time);
                 self.connections.insert(connection_key.clone(), sender);
@@ -176,58 +167,35 @@ impl Client {
             }
         };
 
-        let method = match request.method {
-            HTTPMethod::HEAD => hyper::Method::HEAD,
-            HTTPMethod::GET => hyper::Method::GET,
-            HTTPMethod::POST => hyper::Method::POST,
-            HTTPMethod::PATCH => hyper::Method::PATCH,
-            HTTPMethod::PUT => hyper::Method::PUT,
-            HTTPMethod::DELETE => hyper::Method::DELETE,
-            HTTPMethod::OPTIONS => hyper::Method::OPTIONS,
-            HTTPMethod::TRACE => hyper::Method::TRACE,
-        };
-
-        let mut req_builder = Request::builder().method(method).uri(request.url);
+        let mut req_builder = Request::builder()
+            .method(request.method().as_str())
+            .uri(request.uri().as_str());
 
         req_builder = req_builder.header("host", host);
-        for (key, value) in &request.headers {
-            req_builder = req_builder.header(key, value);
+        for (key, value) in request.headers().iter() {
+            req_builder = req_builder.header(key.as_str(), value.as_str());
         }
 
-        let body = request.body.unwrap_or_default();
-        let req = req_builder.body(body).map_err(|err| HTTPError {
-            message: format!("Failed to build request: {err:?}"),
-        })?;
+        let body = request.body().unwrap_or_default();
+        let req = req_builder.body(body.to_vec()).map_err(|err| anyhow::anyhow!("Failed to build request: {err:?}"))?;
 
         let send_start = Instant::now();
-        let res = sender.send_request(req).await.map_err(|err| HTTPError {
-            message: format!("Failed to send request: {err:?}"),
-        })?;
+        let res = sender.send_request(req).await.map_err(|err| anyhow::anyhow!("Failed to send request: {err:?}"))?;
         let latency = send_start.elapsed();
 
         let status = res.status().as_u16();
         let successful = res.status().is_success();
 
-        let mut headers = HashMap::new();
+        let mut headers = http::Headers::new();
         for (name, value) in res.headers() {
-            headers.insert(
-                name.to_string(),
-                value
-                    .to_str()
-                    .map_err(|err| HTTPError {
-                        message: format!("Could not parse response header {value:?}: {err:?}"),
-                    })?
-                    .to_string(),
-            );
+            headers.append(name.as_str(), value.to_str().map_err(|err| anyhow::anyhow!("Could not parse response header {value:?}: {err:?}"))?);
         }
 
         let body = res.into_body();
         let body = body
             .collect()
             .await
-            .map_err(|err| HTTPError {
-                message: format!("Failed to collect response body: {err:?}"),
-            })?
+            .map_err(|err| anyhow::anyhow!("Failed to collect response body: {err:?}"))?
             .to_bytes();
 
         let total_time = start.elapsed();
@@ -249,11 +217,9 @@ impl Client {
 
         sender.reset();
 
-        let http_response = HTTPResponse {
-            headers,
-            body: body.to_vec(),
-            status,
-        };
+        let http_response = http::Response::new(status)
+            .with_headers(headers)
+            .with_body(Some(body.to_vec()));
 
         Ok((http_response, request_info))
     }

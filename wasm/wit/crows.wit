@@ -1,0 +1,31 @@
+package crows:wasi;
+
+interface types {
+    /// Represents a duration in nanoseconds
+    type duration = u64;
+
+    /// Configuration for constant arrival rate
+    record constant-arrival-rate-config {
+        duration: duration,
+        rate: u64,
+        time-unit: duration,
+        allocated-vus: u64,
+        graceful-shutdown-timeout: duration,
+    }
+
+    /// Configuration variants
+    variant config {
+        constant-arrival-rate(constant-arrival-rate-config),
+    }
+}
+
+world crows {
+    // I'm not going to use entire proxy, but it seems like the easiest way
+    // to include http stuff
+    include wasi:http/proxy@0.2.1;
+
+    use types.{config};
+    
+    export get-config: func() -> config;
+    export run-scenario: func();
+}

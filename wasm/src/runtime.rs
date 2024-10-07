@@ -1,16 +1,10 @@
 use anyhow::Result;
-use crate::{HTTPMethod, HTTPRequest};
 use crows_utils::services::RequestInfo;
-use local::crows::types::HttpMethod;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{mpsc::UnboundedSender, oneshot, RwLock};
 use tokio::time::Instant;
-use wasmtime::InstancePre;
-use wasmtime::{
-    component::{bindgen, Component},
-    Module,
-};
+use wasmtime::component::{Component, Resource};
 
 use crate::http_client::Client;
 use crate::{Environment, Instance, WasiHostCtx};
@@ -81,71 +75,6 @@ impl Drop for InstanceHandle {
                     .await;
             });
         }
-    }
-}
-
-bindgen!({
-    world: "crows",
-    path: "crows.wit",
-    async: true,
-});
-
-pub struct HostComponent {
-    client: Client,
-    request_info_sender: UnboundedSender<RequestInfo>,
-}
-
-impl HostComponent {
-    pub fn new(client: Client, request_info_sender: UnboundedSender<RequestInfo>) -> Self {
-        Self {
-            client,
-            request_info_sender,
-        }
-    }
-
-    pub fn clear_connections(&mut self) {
-        self.client.clear_connections();
-    }
-}
-
-#[async_trait::async_trait]
-impl host::Host for HostComponent {
-    async fn http_request(
-        &mut self,
-        request: host::Request,
-    ) -> std::result::Result<host::Response, host::HttpError> {
-        let method = match request.method {
-            HttpMethod::Get => HTTPMethod::GET,
-            HttpMethod::Post => HTTPMethod::POST,
-            HttpMethod::Put => HTTPMethod::PUT,
-            HttpMethod::Delete => HTTPMethod::DELETE,
-            HttpMethod::Patch => HTTPMethod::PATCH,
-            HttpMethod::Head => HTTPMethod::HEAD,
-            HttpMethod::Options => HTTPMethod::OPTIONS,
-            HttpMethod::Trace => HTTPMethod::TRACE,
-        };
-
-        let request = HTTPRequest {
-            url: request.uri,
-            method,
-            headers: request.headers.into_iter().map(|(k, v)| (k, v)).collect(),
-            body: request.body,
-        };
-        let (http_response, request_info) = self
-            .client
-            .http_request(request)
-            .await
-            .map_err(|e| host::HttpError { message: e.message })?;
-
-        let _ = self.request_info_sender.send(request_info);
-
-        let response = host::Response {
-            status: http_response.status,
-            headers: http_response.headers.into_iter().collect(),
-            body: http_response.body,
-        };
-
-        Ok(response)
     }
 }
 

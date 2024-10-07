@@ -4,16 +4,16 @@ mod instance;
 mod remote_io;
 mod runtime;
 mod wasi_host_ctx;
+pub mod http;
 
-use std::collections::HashMap;
 use std::time::Duration;
 
-use crows_shared::{Config, ConstantArrivalRateConfig};
-use crows_utils::services::RunId;
+use crows_shared::ConstantArrivalRateConfig;
+use crows_utils::services::{RequestInfo, RunId};
 use crows_utils::{InfoHandle, InfoMessage};
 use executors::Executors;
-use serde::{Deserialize, Serialize};
-use wasmtime::{Caller, Memory, Store};
+use http_client::Client;
+use tokio::sync::mpsc::UnboundedSender;
 
 pub mod executors;
 
@@ -23,39 +23,7 @@ pub use remote_io::RemoteIo;
 pub use runtime::{Runtime, RuntimeInner, RuntimeMessage};
 pub use wasi_host_ctx::WasiHostCtx;
 
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub enum HTTPMethod {
-    HEAD,
-    GET,
-    POST,
-    PATCH,
-    PUT,
-    DELETE,
-    OPTIONS,
-    TRACE,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct HTTPRequest {
-    // TODO: these should not be public I think, I'd prefer to do a public interface for them
-    pub url: String,
-    pub method: HTTPMethod,
-    pub headers: HashMap<String, String>,
-    pub body: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct HTTPError {
-    pub message: String,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-pub struct HTTPResponse {
-    // TODO: these should not be public I think, I'd prefer to do a public interface for them
-    pub headers: HashMap<String, String>,
-    pub body: Vec<u8>,
-    pub status: u16,
-}
+use wasi::http::types::{self as http, HostOutgoingRequest};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -90,41 +58,43 @@ pub async fn fetch_config(
     instance: Instance,
     mut store: &mut Store<WasiHostCtx>,
 ) -> anyhow::Result<crows_shared::Config> {
-    let config = instance.instance.call_get_config(&mut store).await?;
-    let config = match config {
-        runtime::local::crows::types::Config::ConstantArrivalRate(c) => {
-            Config::ConstantArrivalRate(ConstantArrivalRateConfig {
-                duration: Duration::from_millis(c.duration),
-                rate: c.rate as usize,
-                time_unit: Duration::from_millis(c.time_unit),
-                allocated_vus: c.allocated_vus as usize,
-                graceful_shutdown_timeout: Duration::from_millis(c.graceful_shutdown_timeout)
-            })
-        }
-    };
-    Ok(config)
+    todo!()
+    // let config = instance.instance.call_get_config(&mut store).await?;
+    // let config = match config {
+    //     runtime::local::crows::types::Config::ConstantArrivalRate(c) => {
+    //         crows_shared::Config::ConstantArrivalRate(ConstantArrivalRateConfig {
+    //             duration: Duration::from_millis(c.duration),
+    //             rate: c.rate as usize,
+    //             time_unit: Duration::from_millis(c.time_unit),
+    //             allocated_vus: c.allocated_vus as usize,
+    //             graceful_shutdown_timeout: Duration::from_millis(c.graceful_shutdown_timeout),
+    //         })
+    //     }
+    // };
+    // Ok(config)
 }
 
-pub async fn run_scenario(runtime: Runtime, config: Config) {
-    let info_sender = runtime.info_sender.clone();
-    let mut executor = Executors::create_executor(config, runtime).await;
-
-    tokio::spawn(async move {
-        // TODO: prepare should be an entirely separate step and coordinator should wait for
-        // prepare from all of the workers
-        if let Err(err) = executor.prepare().await {
-            let message = format!("Executor's prepare() function errored out: {err:?}");
-            eprintln!("{message}");
-            if let Err(err) = info_sender.send(InfoMessage::PrepareError(message)) {
-                eprintln!("Couldn't send InfoMessage::PrepareError message to the coordinator. Error: {err:?}");
-            }
-        }
-        if let Err(err) = executor.run().await {
-            let message = format!("Executor's run() function errored out: {err:?}");
-            eprintln!("{message}");
-            if let Err(err) = info_sender.send(InfoMessage::RunError(message)) {
-                eprintln!("Couldn't send InfoMessage::RunError message to the coordinator. Error: {err:?}");
-            }
-        }
-    });
+pub async fn run_scenario(runtime: Runtime, config: crows_shared::Config) {
+    todo!()
+    // let info_sender = runtime.info_sender.clone();
+    // let mut executor = Executors::create_executor(config, runtime).await;
+    //
+    // tokio::spawn(async move {
+    //     // TODO: prepare should be an entirely separate step and coordinator should wait for
+    //     // prepare from all of the workers
+    //     if let Err(err) = executor.prepare().await {
+    //         let message = format!("Executor's prepare() function errored out: {err:?}");
+    //         eprintln!("{message}");
+    //         if let Err(err) = info_sender.send(InfoMessage::PrepareError(message)) {
+    //             eprintln!("Couldn't send InfoMessage::PrepareError message to the coordinator. Error: {err:?}");
+    //         }
+    //     }
+    //     if let Err(err) = executor.run().await {
+    //         let message = format!("Executor's run() function errored out: {err:?}");
+    //         eprintln!("{message}");
+    //         if let Err(err) = info_sender.send(InfoMessage::RunError(message)) {
+    //             eprintln!("Couldn't send InfoMessage::RunError message to the coordinator. Error: {err:?}");
+    //         }
+    //     }
+    // });
 }
