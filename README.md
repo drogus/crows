@@ -229,6 +229,11 @@ I don't have a very precise plan on where I want Crows to go, but some loose tho
 10. More performant memory management. For example at the moment sending an HTTP request means serializing the entire request in the WASM module and then deserializing it on the host side. If a stress test requires sending big files it's generally a waste of CPU cycles as we could quite easily serialize only the headers and url, write body to the WASM memory directly and then send the body straight from the memory rather than copy it anywhere. Another example is that most of the time RPC services and clients could use references.
 11. At the moment there is only one stage possible to be executed - running the scenario itself. I want to also add some kind of a "prepare" step which would run before the scenario itself and which would prepare the data, but I need to think a bit more on how exactly it should work.
 
+### Sponsors
+
+While working on this project I have received support on GitHub Sponsors by [the
+following people](BACKERS.md). Thank you for all the support!
+
 ### License
 
 Crows is licensed under AGPLv3 license.
