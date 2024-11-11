@@ -4,14 +4,21 @@ name = "wasm_example"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
+wit-bindgen = "0.33"
 rand = "0.8"
-
-crows-bindings = { path = "../bindings" }
 
 [profile.release]
 lto = true
+
+[package.metadata.component]
+package = "component:rust-example"
+
+[package.metadata.component.dependencies]
+
+[package.metadata.component.target]
+
+[package.metadata.component.target.dependencies]

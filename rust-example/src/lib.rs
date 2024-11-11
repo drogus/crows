@@ -1,25 +1,39 @@
-use crows_bindings::{
-    config, http_request, ConstantArrivalRateConfig, ExecutorConfig, HTTPMethod::*,
-};
-use std::cell::RefCell;
+// Use wit_bindgen to generate the bindings from the component model to Rust.
+// For more information see: https://github.com/bytecodealliance/wit-bindgen/
+wit_bindgen::generate!({
+    path: "../wasm",
+    world: "crows",
+});
+
 use std::collections::HashMap;
 use std::time::Duration;
 
-#[config]
-fn config() -> ExecutorConfig {
-    let config = ConstantArrivalRateConfig {
-        duration: Duration::from_secs(1),
-        rate: 20,
-        allocated_vus: 1,
-        ..Default::default()
-    };
-    ExecutorConfig::ConstantArrivalRate(config)
-}
+struct GuestComponent;
 
-#[export_name = "scenario"]
-pub fn scenario() {
-    let server_url = std::env::var("SERVER_URL").unwrap();
-    let _ = http_request(
-        server_url, GET, HashMap::new(), "".into(),
-    );
+export!(GuestComponent);
+
+use crate::local::crows::types::{ConstantArrivalRateConfig, Request, HttpMethod};
+
+impl Guest for GuestComponent {
+    fn get_config() -> Config {
+        let config = ConstantArrivalRateConfig {
+            duration: 1000,
+            rate: 20,
+            allocated_vus: 1,
+            graceful_shutdown_timeout: 1000,
+            time_unit: 1000,
+        };
+        Config::ConstantArrivalRate(config)
+    }
+
+    fn run_scenario() {
+        let server_url = std::env::var("SERVER_URL").unwrap();
+        let request = Request {
+            uri: server_url,
+            method: HttpMethod::Get,
+            headers: Vec::new(),
+            body: None
+        };
+        let _ = host::http_request(&request);
+    }
 }

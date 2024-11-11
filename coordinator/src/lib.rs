@@ -111,8 +111,15 @@ impl Coordinator for CoordinatorService {
             .to_owned();
         drop(scenarios);
 
-        let (runtime, _) = crows_wasm::Runtime::new(&scenario, env_vars.clone())
-            .map_err(|err| CoordinatorError::FailedToCreateRuntime(err.to_string()))?;
+        let env_vars_clone = env_vars.clone();
+        let (runtime, _) = tokio::task::spawn_blocking(move || crows_wasm::Runtime::new(&scenario, env_vars_clone)
+            .map_err(|err| CoordinatorError::FailedToCreateRuntime(err.to_string()))
+        )
+        .await
+        .map_err(|e| {
+            CoordinatorError::FailedToCreateRuntime(e.to_string())
+        })??;
+
         let (instance, _, mut store) = runtime
             .new_instance()
             .await

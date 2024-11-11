@@ -1,6 +1,6 @@
 use anyhow::Result;
-use wasmtime::{Engine, Linker};
-use crate::WasiHostCtx;
+use wasmtime::{Engine, component::Linker};
+use crate::{runtime::host, WasiHostCtx};
 
 #[derive(Clone)]
 pub struct Environment {
@@ -11,6 +11,7 @@ pub struct Environment {
 impl Environment {
     pub fn new() -> Result<Self> {
         let mut config = wasmtime::Config::new();
+        config.wasm_component_model(true);
         config.async_support(true);
         config.consume_fuel(true);
 
@@ -18,21 +19,9 @@ impl Environment {
 
         let mut linker = Linker::new(&engine);
 
-        linker
-            .func_wrap("crows", "consume_buffer", WasiHostCtx::consume_buffer)
-            .unwrap();
-        linker
-            .func_wrap_async("crows", "http", |caller, (ptr, len): (u32, u32)| {
-                Box::new(async move {
-                    WasiHostCtx::wrap_async(caller, ptr, len, WasiHostCtx::http).await
-                })
-            })
-            .unwrap();
-        linker
-            .func_wrap("crows", "set_config", WasiHostCtx::set_config)
-            .unwrap();
+        host::add_to_linker(&mut linker, |state: &mut WasiHostCtx| &mut state.host)?;
 
-        wasmtime_wasi::preview1::add_to_linker_async(&mut linker, |t| &mut t.preview2_ctx)?;
+        wasmtime_wasi::add_to_linker_async(&mut linker)?;
 
         Ok(Self { engine, linker })
     }
