@@ -12,14 +12,14 @@ struct GuestComponent;
 
 export!(GuestComponent);
 
-use crate::local::crows::types::{ConstantArrivalRateConfig, Request, HttpMethod};
+use crate::local::crows::types::{ConstantArrivalRateConfig, HttpMethod, Request};
 
 impl Guest for GuestComponent {
     fn get_config() -> Config {
         let config = ConstantArrivalRateConfig {
             duration: 1000,
-            rate: 20,
-            allocated_vus: 1,
+            rate: 1,
+            allocated_vus: 100000,
             graceful_shutdown_timeout: 1000,
             time_unit: 1000,
         };
@@ -32,7 +32,7 @@ impl Guest for GuestComponent {
             uri: server_url,
             method: HttpMethod::Get,
             headers: Vec::new(),
-            body: None
+            body: None,
         };
         let _ = host::http_request(&request);
     }

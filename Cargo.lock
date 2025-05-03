@@ -783,6 +783,7 @@ dependencies = [
  "crows-utils",
  "crows-wasm",
  "futures 0.3.28",
+ "rustls",
  "serde",
  "serde_json",
  "tokio",

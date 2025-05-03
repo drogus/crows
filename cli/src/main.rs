@@ -52,6 +52,10 @@ enum WorkersCommands {
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .unwrap();
+
     let cli = Cli::parse();
 
     match &cli.command {
@@ -67,7 +71,8 @@ pub async fn main() -> anyhow::Result<()> {
             env,
         }) => {
             let (mut coordinator, updates_receiver) = create_coordinator().await?;
-            let env_vars: HashMap<String, String> = env.into_iter()
+            let env_vars: HashMap<String, String> = env
+                .into_iter()
                 .filter_map(|s| {
                     let parts: Vec<&str> = s.splitn(2, '=').collect();
                     if parts.len() == 2 {
@@ -77,7 +82,14 @@ pub async fn main() -> anyhow::Result<()> {
                     }
                 })
                 .collect();
-            commands::start(&mut coordinator, name, workers_number, env_vars, updates_receiver).await?;
+            commands::start(
+                &mut coordinator,
+                name,
+                workers_number,
+                env_vars,
+                updates_receiver,
+            )
+            .await?;
         }
         Some(Commands::Workers { command }) => match &command {
             Some(WorkersCommands::List) => {

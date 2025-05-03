@@ -27,3 +27,4 @@ anyhow.workspace = true
 crows-utils.workspace = true
 crows-service.workspace = true
 crows-wasm.workspace = true
+rustls.workspace = true

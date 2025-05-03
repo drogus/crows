@@ -98,7 +98,11 @@ pub fn print(
     for (name, worker) in workers {
         // TODO: this should really be an enum
         if let Some(_) = worker.error {
-            execute!(stdout, Print(format!("{}: Error", name,)), MoveToNextLine(1),)?;
+            execute!(
+                stdout,
+                Print(format!("{}: Error", name,)),
+                MoveToNextLine(1),
+            )?;
         } else if worker.done {
             execute!(stdout, Print(format!("{}: Done", name,)), MoveToNextLine(1),)?;
         } else {
