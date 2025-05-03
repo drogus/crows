@@ -217,6 +217,21 @@ pub fn calculate_summary<T>(latencies: &Vec<T>) -> SummaryStats
 where
     T: LatencyInfo,
 {
+    if latencies.is_empty() {
+        return SummaryStats {
+            avg: Duration::from_secs(0),
+            min: Duration::from_secs(0),
+            max: Duration::from_secs(0),
+            med: Duration::from_secs(0),
+            p90: Duration::from_secs(0),
+            p95: Duration::from_secs(0),
+            total: 0,
+            fail_rate: 0.0,
+            success_count: 0,
+            fail_count: 0,
+        };
+    }
+
     let mut latencies_sorted: Vec<f64> = latencies.iter().map(|l| l.latency()).collect();
     latencies_sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
 

@@ -19,7 +19,7 @@ impl Guest for GuestComponent {
         let config = ConstantArrivalRateConfig {
             duration: 1000,
             rate: 1,
-            allocated_vus: 100000,
+            allocated_vus: 1,
             graceful_shutdown_timeout: 1000,
             time_unit: 1000,
         };
