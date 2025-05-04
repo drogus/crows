@@ -17,7 +17,7 @@ use crate::local::crows::types::{ConstantArrivalRateConfig, HttpMethod, Request}
 impl Guest for GuestComponent {
     fn get_config() -> Config {
         let config = ConstantArrivalRateConfig {
-            duration: 1000,
+            duration: 10000,
             rate: 1,
             allocated_vus: 1,
             graceful_shutdown_timeout: 1000,
