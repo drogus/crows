@@ -73,7 +73,9 @@ pub async fn run_wasm(
 ) -> anyhow::Result<()> {
     if let Err(err) = instance.instance.call_run_scenario(&mut store).await {
         if let Err(e) = store.data().stderr_sender.send(
-            format!("Encountered an error when running a scenario: {err:?}")
+            // TODO: check the type of original error - we should probably display the
+            // error if it's not an error from the scenario
+            format!("Encountered an error when running a scenario.")
                 .as_bytes()
                 .to_vec(),
         ) {
