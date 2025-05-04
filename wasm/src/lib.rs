@@ -100,7 +100,7 @@ pub async fn fetch_config(
                 rate: c.rate as usize,
                 time_unit: Duration::from_millis(c.time_unit),
                 allocated_vus: c.allocated_vus as usize,
-                graceful_shutdown_timeout: Duration::from_millis(c.graceful_shutdown_timeout)
+                graceful_shutdown_timeout: Duration::from_millis(c.graceful_shutdown_timeout),
             })
         }
     };

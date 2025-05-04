@@ -1,7 +1,7 @@
 mod constant_arrival_rate;
+use crate::Runtime;
 use constant_arrival_rate::ConstantArrivalRateExecutor;
 use crows_shared::Config;
-use crate::Runtime;
 
 pub trait Executor {
     #[allow(async_fn_in_trait)]
@@ -28,9 +28,7 @@ impl Executors {
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
         match self {
-            Executors::ConstantArrivalRateExecutor(ref mut executor) => {
-                executor.run().await?
-            }
+            Executors::ConstantArrivalRateExecutor(ref mut executor) => executor.run().await?,
         }
 
         Ok(())
@@ -38,9 +36,7 @@ impl Executors {
 
     pub async fn prepare(&mut self) -> anyhow::Result<()> {
         match self {
-            Executors::ConstantArrivalRateExecutor(ref mut executor) => {
-                executor.prepare().await?
-            }
+            Executors::ConstantArrivalRateExecutor(ref mut executor) => executor.prepare().await?,
         }
 
         Ok(())

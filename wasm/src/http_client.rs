@@ -1,10 +1,10 @@
-use anyhow::Result;
 use crate::{HTTPError, HTTPMethod, HTTPRequest, HTTPResponse};
+use anyhow::Result;
 use crows_utils::services::RequestInfo;
 use http_body_util::BodyExt;
-use hyper_rustls::ConfigBuilderExt;
 use hyper::body::{Body, Incoming as IncomingBody};
 use hyper::{Request, Response};
+use hyper_rustls::ConfigBuilderExt;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use rustls::pki_types::ServerName;
 use rustls::ClientConfig;
@@ -270,7 +270,8 @@ impl Client {
 
         let addr = format!("{}:{}", host, port);
         // DNS resolution is a blocking operation in tokio
-        let socket_addr = tokio::task::spawn_blocking(move || addr.to_socket_addrs()).await
+        let socket_addr = tokio::task::spawn_blocking(move || addr.to_socket_addrs())
+            .await
             .map_err(|err| HTTPError {
                 message: format!("Failed to resolve domain: {err:?}"),
             })?

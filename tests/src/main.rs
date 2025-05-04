@@ -1,10 +1,5 @@
 use anyhow::Result;
-use axum::{
-    routing::get,
-    Router,
-    http::StatusCode,
-    response::IntoResponse,
-};
+use axum::{http::StatusCode, response::IntoResponse, routing::get, Router};
 use crows_shared::{Config, ConstantArrivalRateConfig};
 use crows_utils::services::{connect_to_coordinator, CoordinatorClient};
 use crows_utils::InfoMessage;
@@ -21,8 +16,8 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
-    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
     use axum::extract::State;
+    use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
     use super::*;
 
@@ -40,7 +35,7 @@ mod tests {
     async fn handler(State(request_count): State<Arc<Mutex<usize>>>) -> impl IntoResponse {
         let mut count = request_count.lock().await;
         *count += 1;
-        
+
         (StatusCode::OK, "OK")
     }
 
@@ -48,8 +43,10 @@ mod tests {
     ) -> anyhow::Result<(CoordinatorClient, UnboundedReceiver<(String, InfoMessage)>)> {
         let (updates_sender, updates_receiver) = unbounded_channel();
         let url = std::env::var("CROWS_COORDINATOR_URL").unwrap_or("127.0.0.1:8282".to_string());
-        let coordinator =
-            connect_to_coordinator(url, |_| async { Ok(crows::ClientService { updates_sender }) }).await?;
+        let coordinator = connect_to_coordinator(url, |_| async {
+            Ok(crows::ClientService { updates_sender })
+        })
+        .await?;
         Ok((coordinator, updates_receiver))
     }
 
@@ -77,7 +74,8 @@ mod tests {
     #[tokio::test]
     async fn test_distributed_stress_test() -> Result<()> {
         rustls::crypto::ring::default_provider()
-            .install_default().unwrap();
+            .install_default()
+            .unwrap();
 
         // Start the coordinator
         let coordinator_addr = start_coordinator().await?;

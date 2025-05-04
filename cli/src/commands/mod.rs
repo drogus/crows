@@ -1,5 +1,5 @@
-mod start;
 mod run;
+mod start;
 
-pub use start::start;
 pub use run::run;
+pub use start::start;

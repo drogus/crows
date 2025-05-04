@@ -9,6 +9,5 @@ pub async fn main() {
         .parse()
         .unwrap();
 
-
     crows_coordinator::start_server(worker_port, client_port).await;
 }

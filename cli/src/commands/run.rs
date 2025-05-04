@@ -1,4 +1,4 @@
-use std::{path::PathBuf, collections::HashMap};
+use std::{collections::HashMap, path::PathBuf};
 
 use crate::output::drive_progress;
 use crows_wasm::{fetch_config, run_scenario};

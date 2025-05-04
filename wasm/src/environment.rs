@@ -1,6 +1,6 @@
-use anyhow::Result;
-use wasmtime::{Engine, component::Linker};
 use crate::{runtime::host, WasiHostCtx};
+use anyhow::Result;
+use wasmtime::{component::Linker, Engine};
 
 #[derive(Clone)]
 pub struct Environment {

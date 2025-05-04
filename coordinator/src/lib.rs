@@ -78,10 +78,11 @@ impl Coordinator for CoordinatorService {
                 if let Err(e) = worker_entry
                     .client
                     .upload_scenario(name.clone(), content.clone())
-                    .await {
-                        // TODO: should we send it to a client
-                        eprintln!("Error while uploading scenario to a worker: {e:?}");
-                    }
+                    .await
+                {
+                    // TODO: should we send it to a client
+                    eprintln!("Error while uploading scenario to a worker: {e:?}");
+                }
             });
 
             join_all(futures).await;
@@ -112,13 +113,12 @@ impl Coordinator for CoordinatorService {
         drop(scenarios);
 
         let env_vars_clone = env_vars.clone();
-        let (runtime, _) = tokio::task::spawn_blocking(move || crows_wasm::Runtime::new(&scenario, env_vars_clone)
-            .map_err(|err| CoordinatorError::FailedToCreateRuntime(err.to_string()))
-        )
+        let (runtime, _) = tokio::task::spawn_blocking(move || {
+            crows_wasm::Runtime::new(&scenario, env_vars_clone)
+                .map_err(|err| CoordinatorError::FailedToCreateRuntime(err.to_string()))
+        })
         .await
-        .map_err(|e| {
-            CoordinatorError::FailedToCreateRuntime(e.to_string())
-        })??;
+        .map_err(|e| CoordinatorError::FailedToCreateRuntime(e.to_string()))??;
 
         let (instance, _, mut store) = runtime
             .new_instance()

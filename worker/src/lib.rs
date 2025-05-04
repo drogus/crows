@@ -49,9 +49,7 @@ impl Worker for WorkerService {
                 .map_err(|err| WorkerError::CouldNotCreateRuntime(err.to_string()))
         })
         .await
-        .map_err(|e| {
-            WorkerError::CouldNotCreateRuntime(e.to_string())
-        })??;
+        .map_err(|e| WorkerError::CouldNotCreateRuntime(e.to_string()))??;
 
         run_scenario(runtime, config).await;
 

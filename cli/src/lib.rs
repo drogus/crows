@@ -1,10 +1,13 @@
-pub mod output;
 pub mod commands;
+pub mod output;
 
 pub use commands::run;
 
-use crows_utils::{services::{Client, CoordinatorClient, RunId, connect_to_coordinator}, InfoMessage};
-use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver, unbounded_channel};
+use crows_utils::{
+    services::{connect_to_coordinator, Client, CoordinatorClient, RunId},
+    InfoMessage,
+};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 #[derive(Clone)]
 pub struct ClientService {
@@ -13,12 +16,12 @@ pub struct ClientService {
 
 impl Client for ClientService {
     async fn update(&self, _: RunId, worker_name: String, info: InfoMessage) {
-        let _= self.updates_sender.send((worker_name, info));
+        let _ = self.updates_sender.send((worker_name, info));
     }
 }
 
-pub async fn create_coordinator() -> anyhow::Result<(CoordinatorClient, UnboundedReceiver<(String, InfoMessage)>)>
-{
+pub async fn create_coordinator(
+) -> anyhow::Result<(CoordinatorClient, UnboundedReceiver<(String, InfoMessage)>)> {
     let (updates_sender, updates_receiver) = unbounded_channel();
     let url = std::env::var("CROWS_COORDINATOR_URL").unwrap_or("127.0.0.1:8282".to_string());
     let coordinator =
