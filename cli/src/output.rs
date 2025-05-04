@@ -5,14 +5,14 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use std::collections::HashMap;
 use std::io::Stdout;
 use std::io::{stdout, Write};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use crossterm::{
-    cursor::{self, MoveTo, MoveToNextLine, MoveUp},
+    cursor::{self, MoveDown, MoveTo, MoveToNextLine, MoveUp},
     execute,
     style::Print,
-    terminal::{self, Clear, ClearType, ScrollUp},
+    terminal::{self, Clear, ClearType, ScrollDown, ScrollUp},
 };
 
 #[derive(Default)]
@@ -75,9 +75,9 @@ pub fn print(
 
     execute!(
         stdout,
-        MoveTo(0, height - progress_lines as u16),
+        MoveTo(0, height - progress_lines - 1 as u16),
+        Clear(ClearType::CurrentLine),
         Clear(ClearType::FromCursorDown),
-        MoveUp(1),
     )?;
 
     for line in lines {
@@ -85,14 +85,13 @@ pub fn print(
         execute!(stdout, Print(line))?;
         let (_, new_y) = cursor::position()?;
         let n = new_y - y;
-        execute!(stdout, ScrollUp(n), MoveUp(n))?;
+        execute!(stdout, ScrollUp(n + 1), MoveToNextLine(n + 1))?;
     }
 
     execute!(
         stdout,
-        MoveTo(0, height - progress_lines as u16 + 1),
+        MoveTo(0, height - progress_lines + 1 as u16),
         Clear(ClearType::FromCursorDown),
-        MoveUp(1),
     )?;
 
     for (name, worker) in workers {
@@ -253,40 +252,148 @@ where
     }
 }
 
+// Helper function to process buffers and extract complete lines
+fn process_buffer(buffer: &mut String) -> Option<Vec<String>> {
+    if !buffer.contains('\n') {
+        return None;
+    }
+
+    let mut lines = Vec::new();
+    let mut parts: Vec<&str> = buffer.split('\n').collect();
+
+    // If the buffer doesn't end with a newline, the last part is incomplete
+    let has_trailing_newline = buffer.ends_with('\n');
+    let last_idx = parts.len() - 1;
+
+    // Process all complete lines (all parts except possibly the last one)
+    for (i, part) in parts.iter().enumerate() {
+        if i < last_idx || has_trailing_newline {
+            // This is a complete line
+            if !part.is_empty() {
+                lines.push(part.to_string());
+            }
+        }
+    }
+
+    // Update the buffer to contain only the incomplete part (if any)
+    if has_trailing_newline {
+        // All parts were complete lines
+        buffer.clear();
+    } else {
+        // Keep the last part as it's incomplete
+        let remaining = parts.last().unwrap_or(&"").to_string();
+        *buffer = remaining;
+    }
+
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines)
+    }
+}
+
 pub async fn drive_progress(
     worker_names: Vec<String>,
     mut updates_receiver: UnboundedReceiver<(String, InfoMessage)>,
 ) -> anyhow::Result<()> {
     let mut stdout = stdout();
-
     let progress_lines = worker_names.len() as u16;
 
     let mut all_request_stats: Vec<RequestInfo> = Vec::new();
     let mut all_iteration_stats: Vec<IterationInfo> = Vec::new();
     let mut worker_states: HashMap<String, WorkerState> = HashMap::new();
 
+    // Buffers for stdout and stderr for each worker
+    let mut stdout_buffers: HashMap<String, String> = HashMap::new();
+    let mut stderr_buffers: HashMap<String, String> = HashMap::new();
+
+    // Track last flush time for each worker
+    let mut last_flush_time: HashMap<String, Instant> = HashMap::new();
+    let flush_interval = Duration::from_millis(500);
+
     for name in worker_names {
         worker_states.insert(name.clone(), Default::default());
+        stdout_buffers.insert(name.clone(), String::new());
+        stderr_buffers.insert(name.clone(), String::new());
+        last_flush_time.insert(name.clone(), Instant::now());
     }
+
+    execute!(
+        stdout,
+        ScrollUp(progress_lines),
+        MoveUp(progress_lines),
+        Clear(ClearType::FromCursorDown),
+    )?;
 
     while let Some((worker_name, update)) = updates_receiver.recv().await {
         let mut lines = Vec::new();
         let state = worker_states
             .get_mut(&worker_name)
-            .ok_or(anyhow!("Couldn't findt the worker"))?;
+            .ok_or(anyhow!("Couldn't find the worker"))?;
+
+        // Update last flush time if it doesn't exist
+        let last_flush = last_flush_time
+            .entry(worker_name.clone())
+            .or_insert(Instant::now());
+        let time_since_last_flush = last_flush.elapsed();
+        let should_flush_time = time_since_last_flush >= flush_interval;
 
         match update {
             InfoMessage::Stderr(buf) => {
-                lines.push(format!(
-                    "[ERROR][{worker_name}] {}",
-                    String::from_utf8_lossy(&buf)
-                ));
+                let content = String::from_utf8_lossy(&buf).to_string();
+
+                // Append to the buffer
+                let buffer = stderr_buffers
+                    .entry(worker_name.clone())
+                    .or_insert(String::new());
+                buffer.push_str(&content);
+
+                // Check if we need to flush based on newlines
+                let has_newline = buffer.contains('\n');
+
+                // Process complete lines if there are newlines
+                if has_newline {
+                    if let Some(complete_lines) = process_buffer(buffer) {
+                        for line in complete_lines {
+                            lines.push(format!("[ERROR][{worker_name}] {}", line));
+                        }
+                    }
+                }
+
+                // If we should flush based on time and there's content in the buffer
+                if should_flush_time && !buffer.is_empty() {
+                    lines.push(format!("[ERROR][{worker_name}] {}", buffer));
+                    buffer.clear();
+                    *last_flush = Instant::now();
+                }
             }
             InfoMessage::Stdout(buf) => {
-                lines.push(format!(
-                    "[INFO][{worker_name}] {}",
-                    String::from_utf8_lossy(&buf)
-                ));
+                let content = String::from_utf8_lossy(&buf).to_string();
+
+                // Append to the buffer
+                let buffer = stdout_buffers
+                    .entry(worker_name.clone())
+                    .or_insert(String::new());
+                buffer.push_str(&content);
+
+                // Check if we need to flush based on newlines
+                let has_newline = buffer.contains('\n');
+
+                // Process complete lines if there are newlines
+                if has_newline {
+                    if let Some(complete_lines) = process_buffer(buffer) {
+                        for line in complete_lines {
+                            lines.push(format!("[INFO][{worker_name}] {}", line));
+                        }
+                    }
+                }
+
+                // If we should flush based on time and there's content in the buffer
+                if should_flush_time && !buffer.is_empty() {
+                    lines.push(format!("[INFO][{worker_name}] {}", buffer));
+                    buffer.clear();
+                    *last_flush = Instant::now();
+                }
             }
             InfoMessage::RequestInfo(info) => {
                 all_request_stats.push(info);
@@ -313,6 +420,21 @@ pub async fn drive_progress(
         }
 
         if worker_states.values().all(|s| s.done || s.error.is_some()) {
+            // Flush any remaining content in buffers
+            for (worker, buffer) in stderr_buffers.iter_mut() {
+                if !buffer.is_empty() {
+                    lines.push(format!("[ERROR][{}] {}", worker, buffer));
+                    buffer.clear();
+                }
+            }
+
+            for (worker, buffer) in stdout_buffers.iter_mut() {
+                if !buffer.is_empty() {
+                    lines.push(format!("[INFO][{}] {}", worker, buffer));
+                    buffer.clear();
+                }
+            }
+
             break;
         }
 
@@ -323,9 +445,9 @@ pub async fn drive_progress(
     let iteration_summary = calculate_summary(&all_iteration_stats);
 
     let mut lines = Vec::new();
-    lines.push(format!("\nSummary:\n"));
+    lines.push(format!("\nSummary:"));
     lines.push(format!(
-        "http_req_duration..........: avg={}\tmin={}\tmed={}\tmax={}\tp(90)={}\tp(95)={}\n",
+        "http_req_duration..........: avg={}\tmin={}\tmed={}\tmax={}\tp(90)={}\tp(95)={}",
         format_duration(request_summary.avg),
         format_duration(request_summary.min),
         format_duration(request_summary.med),
@@ -334,15 +456,15 @@ pub async fn drive_progress(
         format_duration(request_summary.p95)
     ));
     lines.push(format!(
-        "http_req_failed............: {:.2}%\t✓ {}\t✗ {}\n",
+        "http_req_failed............: {:.2}%\t✓ {}\t✗ {}",
         request_summary.fail_rate, request_summary.success_count, request_summary.fail_count
     ));
     lines.push(format!(
-        "http_reqs..................: {}\n",
+        "http_reqs..................: {}",
         request_summary.total
     ));
     lines.push(format!(
-        "iteration_duration.........: avg={}\tmin={}\tmed={}\tmax={}\tp(90)={}\tp(95)={}\n",
+        "iteration_duration.........: avg={}\tmin={}\tmed={}\tmax={}\tp(90)={}\tp(95)={}",
         format_duration(iteration_summary.avg),
         format_duration(iteration_summary.min),
         format_duration(iteration_summary.med),
@@ -351,7 +473,7 @@ pub async fn drive_progress(
         format_duration(iteration_summary.p95)
     ));
     lines.push(format!(
-        "iterations.................: {}\n",
+        "iterations.................: {}",
         iteration_summary.total
     ));
 
