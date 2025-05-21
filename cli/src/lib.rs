@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod output;
+pub mod printers;
 
 pub use commands::run;
 

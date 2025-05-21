@@ -1,10 +1,10 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use crate::output::drive_progress;
+use crate::output::{drive_progress, OutputType};
 use crows_wasm::{fetch_config, run_scenario};
 use tokio::sync::mpsc::unbounded_channel;
 
-pub async fn run(path: &PathBuf) -> anyhow::Result<()> {
+pub async fn run(path: &PathBuf, output_type: OutputType) -> anyhow::Result<()> {
     let scenario = std::fs::read(path).unwrap();
     let (runtime, mut info_handle) =
         crows_wasm::Runtime::new(&scenario, HashMap::new()).expect("Could not create a runtime");
@@ -28,7 +28,7 @@ pub async fn run(path: &PathBuf) -> anyhow::Result<()> {
         }
     });
 
-    drive_progress(vec!["worker".to_string()], updates_receiver)
+    drive_progress(vec!["worker".to_string()], updates_receiver, output_type)
         .await
         .expect("Error while running the scenario");
 

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::output::drive_progress;
+use crate::output::{drive_progress, OutputType};
 use crows_utils::{services::CoordinatorClient, InfoMessage};
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -10,6 +10,7 @@ pub async fn start(
     workers_number: &usize,
     env_vars: HashMap<String, String>,
     updates_receiver: UnboundedReceiver<(String, InfoMessage)>,
+    output_type: OutputType,
 ) -> anyhow::Result<()> {
     let (_, mut worker_names) = coordinator
         .start(name.to_string(), workers_number.clone(), env_vars)
@@ -19,7 +20,7 @@ pub async fn start(
 
     worker_names.sort();
 
-    drive_progress(worker_names, updates_receiver)
+    drive_progress(worker_names, updates_receiver, output_type)
         .await
         .expect("Error while running a scenario");
 

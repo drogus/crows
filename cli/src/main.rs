@@ -4,8 +4,10 @@ use std::path::PathBuf;
 use crows::create_coordinator;
 use crows_utils::InfoMessage;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+
+use crows::output::OutputType;
 
 pub use crows::commands;
 pub use crows::output;
@@ -13,6 +15,10 @@ pub use crows::output;
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
+    /// Output format to use
+    #[arg(long, global = true, value_enum, default_value_t = OutputType::Default)]
+    output: OutputType,
+    
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -88,6 +94,7 @@ pub async fn main() -> anyhow::Result<()> {
                 workers_number,
                 env_vars,
                 updates_receiver,
+                cli.output,
             )
             .await?;
         }
@@ -107,7 +114,7 @@ pub async fn main() -> anyhow::Result<()> {
             None => {}
         },
         Some(Commands::Run { path }) => {
-            commands::run(path)
+            commands::run(path, cli.output)
                 .await
                 .expect("An error while running a scenario");
         }

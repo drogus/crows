@@ -3,17 +3,12 @@ use crows_utils::InfoMessage;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use std::collections::HashMap;
-use std::io::Stdout;
-use std::io::{stdout, Write};
 use std::time::{Duration, Instant};
 
-use anyhow::anyhow;
-use crossterm::{
-    cursor::{self, MoveDown, MoveTo, MoveToNextLine, MoveUp},
-    execute,
-    style::Print,
-    terminal::{self, Clear, ClearType, ScrollDown, ScrollUp},
-};
+use anyhow::{anyhow, Result};
+
+// Import the printers module
+use crate::printers::{Crossterm, Simple};
 
 #[derive(Default)]
 pub struct SummaryStats {
@@ -64,97 +59,47 @@ impl LatencyInfo for IterationInfo {
     }
 }
 
-pub fn print(
-    stdout: &mut Stdout,
-    progress_lines: u16,
-    lines: Vec<String>,
-    workers: &HashMap<String, WorkerState>,
-    last: bool,
-) -> anyhow::Result<()> {
-    let (_, height) = terminal::size()?;
+/// The OutputPrinter trait defines the interface for different output printing mechanisms.
+pub trait OutputPrinter {
+    /// Print progress information and output lines
+    fn print(
+        &mut self,
+        lines: Vec<String>,
+        workers: &HashMap<String, WorkerState>,
+        last: bool,
+    ) -> Result<()>;
 
-    execute!(
-        stdout,
-        MoveTo(0, height - progress_lines - 1 as u16),
-        Clear(ClearType::CurrentLine),
-        Clear(ClearType::FromCursorDown),
-    )?;
+    /// Print a summary of worker states
+    fn print_workers_summary(
+        &mut self,
+        workers: &HashMap<String, WorkerState>,
+    ) -> Result<()>;
 
-    for line in lines {
-        let (_, y) = cursor::position()?;
-        execute!(stdout, Print(line))?;
-        let (_, new_y) = cursor::position()?;
-        let n = new_y - y;
-        execute!(stdout, ScrollUp(n + 1), MoveToNextLine(n + 1))?;
-    }
-
-    execute!(
-        stdout,
-        MoveTo(0, height - progress_lines + 1 as u16),
-        Clear(ClearType::FromCursorDown),
-    )?;
-
-    for (name, worker) in workers {
-        // TODO: this should really be an enum
-        if let Some(_) = worker.error {
-            execute!(
-                stdout,
-                Print(format!("{}: Error", name,)),
-                MoveToNextLine(1),
-            )?;
-        } else if worker.done {
-            execute!(stdout, Print(format!("{}: Done", name,)), MoveToNextLine(1),)?;
-        } else {
-            let progress_percentage = worker.duration.as_secs_f64()
-                / (worker.duration.as_secs_f64() + worker.left.as_secs_f64())
-                * 100 as f64;
-            execute!(
-                stdout,
-                Print(format!(
-                    "{}: [{: <25}] {:.2}% ({}/{})",
-                    name,
-                    "*".repeat((progress_percentage as usize) / 4),
-                    progress_percentage,
-                    worker.active_instances,
-                    worker.capacity,
-                )),
-                MoveToNextLine(1),
-            )?;
-        }
-    }
-    if last {
-        execute!(stdout, Print("\n"),)?;
-    }
-
-    stdout.flush()?;
-
-    Ok(())
+    /// Initialize the printer with the number of workers
+    fn initialize(&mut self, workers_count: usize) -> Result<()>;
 }
 
-pub fn print_workers_summary(
-    stdout: &mut Stdout,
-    workers: &HashMap<String, WorkerState>,
-) -> anyhow::Result<()> {
-    let (_, height) = terminal::size()?;
+/// Enum representing different output types
+#[derive(Debug, Clone, Copy, PartialEq, clap::ValueEnum)]
+pub enum OutputType {
+    /// Default interactive terminal UI with progress bars
+    Default,
+    /// Simple plain text output for debugging
+    Plain,
+}
 
-    execute!(
-        stdout,
-        MoveTo(0, height - workers.len() as u16 + 1),
-        Clear(ClearType::FromCursorDown),
-        MoveUp(1),
-    )?;
-
-    for (name, worker) in workers {
-        if let Some(ref msg) = worker.error {
-            execute!(stdout, Print(format!("{}: Error - {msg}\n", name,)),)?;
-        } else if worker.done {
-            execute!(stdout, Print(format!("{}: Done\n", name,)),)?;
-        }
+impl Default for OutputType {
+    fn default() -> Self {
+        OutputType::Default
     }
+}
 
-    stdout.flush()?;
-
-    Ok(())
+/// Factory function to create the appropriate printer based on the output type
+pub fn create_printer(output_type: OutputType) -> Box<dyn OutputPrinter> {
+    match output_type {
+        OutputType::Plain => Box::new(Simple::default()),
+        OutputType::Default => Box::new(Crossterm::default()),
+    }
 }
 
 pub fn format_duration(duration: Duration) -> String {
@@ -259,7 +204,7 @@ fn process_buffer(buffer: &mut String) -> Option<Vec<String>> {
     }
 
     let mut lines = Vec::new();
-    let mut parts: Vec<&str> = buffer.split('\n').collect();
+    let parts: Vec<&str> = buffer.split('\n').collect();
 
     // If the buffer doesn't end with a newline, the last part is incomplete
     let has_trailing_newline = buffer.ends_with('\n');
@@ -295,9 +240,9 @@ fn process_buffer(buffer: &mut String) -> Option<Vec<String>> {
 pub async fn drive_progress(
     worker_names: Vec<String>,
     mut updates_receiver: UnboundedReceiver<(String, InfoMessage)>,
+    output_type: OutputType,
 ) -> anyhow::Result<()> {
-    let mut stdout = stdout();
-    let progress_lines = worker_names.len() as u16;
+    let mut printer = create_printer(output_type);
 
     let mut all_request_stats: Vec<RequestInfo> = Vec::new();
     let mut all_iteration_stats: Vec<IterationInfo> = Vec::new();
@@ -318,12 +263,8 @@ pub async fn drive_progress(
         last_flush_time.insert(name.clone(), Instant::now());
     }
 
-    execute!(
-        stdout,
-        ScrollUp(progress_lines),
-        MoveUp(progress_lines),
-        Clear(ClearType::FromCursorDown),
-    )?;
+    // Initialize the printer with the number of workers
+    printer.initialize(worker_states.len())?;
 
     while let Some((worker_name, update)) = updates_receiver.recv().await {
         let mut lines = Vec::new();
@@ -438,7 +379,7 @@ pub async fn drive_progress(
             break;
         }
 
-        print(&mut stdout, progress_lines, lines, &worker_states, false).unwrap();
+        printer.print(lines, &worker_states, false).unwrap();
     }
 
     let request_summary = calculate_summary(&all_request_stats);
@@ -477,9 +418,8 @@ pub async fn drive_progress(
         iteration_summary.total
     ));
 
-    print(&mut stdout, progress_lines, lines, &worker_states, false).unwrap();
-
-    print_workers_summary(&mut stdout, &worker_states)?;
+    printer.print(lines, &worker_states, false).unwrap();
+    printer.print_workers_summary(&worker_states)?;
 
     Ok(())
 }
