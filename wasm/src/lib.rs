@@ -71,7 +71,11 @@ pub async fn run_wasm(
     instance: &mut Instance,
     mut store: &mut Store<WasiHostCtx>,
 ) -> anyhow::Result<()> {
+    instance.clear_connections(&mut store).await;
+
     if let Err(err) = instance.instance.call_run_scenario(&mut store).await {
+        // An error here mean that the scenario failed unrecoverably (the instance exited). In this
+        // case I think we should return an error here and somehow mark the instance as dead, so we can replace it
         if let Err(e) = store.data().stderr_sender.send(
             // TODO: check the type of original error - we should probably display the
             // error if it's not an error from the scenario
@@ -81,9 +85,10 @@ pub async fn run_wasm(
         ) {
             eprintln!("Problem when sending logs to worker: {e:?}");
         }
-    }
 
-    instance.clear_connections(&mut store).await;
+        // TODO: probably will be good to have an explicit error type here
+        return Err(err.into());
+    }
 
     Ok(())
 }

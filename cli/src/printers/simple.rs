@@ -80,9 +80,6 @@ impl OutputPrinter for Printer {
 
     fn initialize(&mut self, workers_count: usize) -> Result<()> {
         self.workers_count = workers_count;
-        writeln!(self.stdout, "\n[INFO] Starting execution with simple output printer (workers: {})")?;
-        self.stdout.flush()?;
-        
         Ok(())
     }
 }
