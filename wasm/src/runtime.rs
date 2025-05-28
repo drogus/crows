@@ -58,6 +58,7 @@ impl InstanceHandle {
 pub struct RuntimeInner {
     pub instances: VecDeque<InstanceHandle>,
     pub info_sender: UnboundedSender<InfoMessage>,
+    pub length: usize,
 }
 
 pub struct Runtime {
@@ -65,7 +66,6 @@ pub struct Runtime {
     pub component_pre: CrowsPre<WasiHostCtx>,
     pub inner: Arc<RwLock<RuntimeInner>>,
     pub info_sender: UnboundedSender<InfoMessage>,
-    pub length: usize,
     pub env_vars: HashMap<String, String>,
 }
 
@@ -154,12 +154,13 @@ impl Runtime {
         Ok(self.info_sender.send(update)?)
     }
 
-    pub fn capacity(&self) -> usize {
-        self.length
+    pub async fn capacity(&self) -> usize {
+        self.inner.read().await.length
     }
 
     pub async fn active_count(&self) -> usize {
-        self.length - self.inner.read().await.instances.len()
+        let inner = self.inner.read().await;
+        inner.length - inner.instances.len()
     }
 
     pub fn new(content: &Vec<u8>, env_vars: HashMap<String, String>) -> Result<(Self, InfoHandle)> {
@@ -181,9 +182,9 @@ impl Runtime {
                 inner: Arc::new(RwLock::new(RuntimeInner {
                     instances: VecDeque::new(),
                     info_sender: info_sender.clone(),
+                    length: 0,
                 })),
                 info_sender,
-                length: 0,
                 env_vars,
             },
             info_handle,
@@ -235,7 +236,7 @@ impl Runtime {
 
         let mut inner = self.inner.write().await;
         inner.instances.push_back(handle);
-        self.length += 1;
+        inner.length += 1;
         let _ = self.info_sender.send(InfoMessage::InstanceReserved);
 
         Ok(())
