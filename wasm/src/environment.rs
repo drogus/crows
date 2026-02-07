@@ -1,6 +1,7 @@
 use crate::{runtime::host, WasiHostCtx};
 use anyhow::Result;
-use wasmtime::{component::Linker, Engine};
+use wasmtime::component::{HasSelf, Linker};
+use wasmtime::Engine;
 
 #[derive(Clone)]
 pub struct Environment {
@@ -19,9 +20,9 @@ impl Environment {
 
         let mut linker = Linker::new(&engine);
 
-        host::add_to_linker(&mut linker, |state: &mut WasiHostCtx| &mut state.host)?;
+        host::add_to_linker::<_, HasSelf<_>>(&mut linker, |state: &mut WasiHostCtx| &mut state.host)?;
 
-        wasmtime_wasi::add_to_linker_async(&mut linker)?;
+        wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
 
         Ok(Self { engine, linker })
     }

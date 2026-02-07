@@ -7,16 +7,22 @@ use hyper_rustls::ConfigBuilderExt;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::sync::Arc;
-use wasmtime::{Engine, Memory, MemoryType, Store};
+use wasmtime::{Engine, Store};
 
 // TODO: In the future I want the TLS settings to be configurable
 lazy_static! {
-    static ref TLS_CONFIG: Arc<rustls::ClientConfig> = Arc::new(
-        rustls::ClientConfig::builder()
-            .with_native_roots()
-            .unwrap()
-            .with_no_client_auth()
-    );
+    static ref TLS_CONFIG: Arc<rustls::ClientConfig> = {
+        use rustls::crypto::ring::default_provider;
+
+        Arc::new(
+            rustls::ClientConfig::builder_with_provider(Arc::new(default_provider()))
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_native_roots()
+                .unwrap()
+                .with_no_client_auth()
+        )
+    };
 }
 
 pub struct Instance {
@@ -82,10 +88,6 @@ impl Instance {
             stderr_sender,
         };
         let mut store: Store<WasiHostCtx> = Store::new(engine, host_ctx);
-
-        // TODO: we should limit memory to not allow too noisy neighbours
-        let memory = Memory::new(&mut store, MemoryType::new(1, None)).unwrap();
-        store.data_mut().memory = Some(memory);
 
         // WebAssembly execution will be paused for an async yield every time it
         // consumes 10000 fuel. Fuel will be refilled u64::MAX times.

@@ -1,6 +1,6 @@
 use tokio::sync::mpsc::UnboundedSender;
 use wasmtime::Memory;
-use wasmtime_wasi::{WasiCtx, WasiView};
+use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 
 use crate::runtime::HostComponent;
 
@@ -19,10 +19,10 @@ impl WasiHostCtx {
 }
 
 impl WasiView for WasiHostCtx {
-    fn ctx(&mut self) -> &mut WasiCtx {
-        &mut self.wasi
-    }
-    fn table(&mut self) -> &mut wasmtime::component::ResourceTable {
-        &mut self.table
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.wasi,
+            table: &mut self.table,
+        }
     }
 }

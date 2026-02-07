@@ -6,11 +6,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::sync::{mpsc::UnboundedSender, oneshot, RwLock};
 use tokio::time::Instant;
-use wasmtime::InstancePre;
-use wasmtime::{
-    component::{bindgen, Component},
-    Module,
-};
+use wasmtime::component::{bindgen, Component};
 
 use crate::http_client::Client;
 use crate::{Environment, Instance, WasiHostCtx};
@@ -87,7 +83,8 @@ impl Drop for InstanceHandle {
 bindgen!({
     world: "crows",
     path: "crows.wit",
-    async: true,
+    imports: { default: async | trappable },
+    exports: { default: async },
 });
 
 pub struct HostComponent {
@@ -108,12 +105,11 @@ impl HostComponent {
     }
 }
 
-#[async_trait::async_trait]
 impl host::Host for HostComponent {
     async fn http_request(
         &mut self,
         request: host::Request,
-    ) -> std::result::Result<host::Response, host::HttpError> {
+    ) -> wasmtime::Result<std::result::Result<host::Response, host::HttpError>> {
         let method = match request.method {
             HttpMethod::Get => HTTPMethod::GET,
             HttpMethod::Post => HTTPMethod::POST,
@@ -131,11 +127,14 @@ impl host::Host for HostComponent {
             headers: request.headers.into_iter().map(|(k, v)| (k, v)).collect(),
             body: request.body,
         };
-        let (http_response, request_info) = self
+        let (http_response, request_info) = match self
             .client
             .http_request(request)
             .await
-            .map_err(|e| host::HttpError { message: e.message })?;
+        {
+            Ok(resp) => resp,
+            Err(e) => return Ok(Err(host::HttpError { message: e.message })),
+        };
 
         let _ = self.request_info_sender.send(request_info);
 
@@ -145,7 +144,7 @@ impl host::Host for HostComponent {
             body: http_response.body,
         };
 
-        Ok(response)
+        Ok(Ok(response))
     }
 }
 

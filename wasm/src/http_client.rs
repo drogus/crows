@@ -4,7 +4,6 @@ use crows_utils::services::RequestInfo;
 use http_body_util::BodyExt;
 use hyper::body::{Body, Incoming as IncomingBody};
 use hyper::{Request, Response};
-use hyper_rustls::ConfigBuilderExt;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use rustls::pki_types::ServerName;
 use rustls::ClientConfig;

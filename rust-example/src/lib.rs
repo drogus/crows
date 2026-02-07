@@ -27,7 +27,7 @@ impl Guest for GuestComponent {
     }
 
     fn run_scenario() {
-        let server_url = std::env::var("SERVER_URL").unwrap();
+        let server_url = "https://google.com".to_string();
         let request = Request {
             uri: server_url,
             method: HttpMethod::Get,
