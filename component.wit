@@ -1,0 +1,100 @@
+package root:component;
+
+world root {
+  import local:crows/types;
+  import host: interface {
+    use local:crows/types.{request, response, http-error};
+
+    http-request: func(req: request) -> result<response, http-error>;
+  }
+  import wasi:io/error@0.2.6;
+  import wasi:io/streams@0.2.6;
+  import wasi:cli/environment@0.2.6;
+  import wasi:cli/exit@0.2.6;
+  import wasi:cli/stderr@0.2.6;
+  use local:crows/types.{config};
+
+  export get-config: func() -> config;
+  export run-scenario: func();
+}
+package local:crows {
+  interface types {
+    type duration = u64;
+
+    record constant-arrival-rate-config {
+      duration: duration,
+      rate: u64,
+      time-unit: duration,
+      allocated-vus: u64,
+      graceful-shutdown-timeout: duration,
+    }
+
+    variant config {
+      constant-arrival-rate(constant-arrival-rate-config),
+    }
+
+    enum http-method {
+      get,
+      post,
+      put,
+      delete,
+      patch,
+      head,
+      options,
+      trace,
+    }
+
+    record request {
+      method: http-method,
+      uri: string,
+      headers: list<tuple<string, string>>,
+      body: option<string>,
+    }
+
+    record response {
+      status: u16,
+      headers: list<tuple<string, string>>,
+      body: list<u8>,
+    }
+
+    record http-error {
+      message: string,
+    }
+  }
+}
+
+
+package wasi:io@0.2.6 {
+  interface error {
+    resource error {
+      to-debug-string: func() -> string;
+    }
+  }
+  interface streams {
+    use error.{error};
+
+    resource output-stream {
+      blocking-write-and-flush: func(contents: list<u8>) -> result<_, stream-error>;
+    }
+
+    variant stream-error {
+      last-operation-failed(error),
+      closed,
+    }
+  }
+}
+
+
+package wasi:cli@0.2.6 {
+  interface environment {
+    get-environment: func() -> list<tuple<string, string>>;
+  }
+  interface exit {
+    exit: func(status: result);
+  }
+  interface stderr {
+    use wasi:io/streams@0.2.6.{output-stream};
+
+    get-stderr: func() -> output-stream;
+  }
+}
