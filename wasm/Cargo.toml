@@ -16,11 +16,11 @@ url = "2.5"
 hyper-util = "0.1"
 http-body-util = "0.1"
 tower-service = "0.3"
-hyper-rustls = { version = "0.27", features = ["http1", "http2"]}
+hyper-rustls = { version = "0.27", features = ["http1", "http2"] }
 http = "1.1.0"
 lazy_static = "1.5"
 pin-project-lite = "0.2"
-wit-component = "0.225.0"
+wit-component = "0.244.0"
 
 tokio.workspace = true
 anyhow.workspace = true

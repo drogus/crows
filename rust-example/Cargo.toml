@@ -8,7 +8,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-wit-bindgen = "0.33"
+wit-bindgen = "0.52"
 rand = "0.8"
 
 [profile.release]
